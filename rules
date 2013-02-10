@@ -1,0 +1,31 @@
+##
+## logwall ruleset file
+##
+## syntax:
+## <keyword><operator><value>
+## there can be more keyword-operator-value tokens in one line
+##
+## keywords are:
+##   realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, then
+## operators are:
+##   ==  !=  =~  !~  <  >  <=  >=  =
+##
+
+
+# log all logs
+#log=debug
+
+# most system processes
+puid<1000   then=accept
+
+# we dont know the logger's credentials
+exe==""	 severity<error  log=info   then=drop
+powner==""  severity<error  log=info   then=drop
+
+# allow only these for everyone else
+facility==user   then=accept
+facility==local3   then=drop
+facility>=local1  facility<=local7   then=accept
+
+# drop policy
+log=info then=drop

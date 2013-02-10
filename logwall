@@ -1,0 +1,209 @@
+#!/usr/bin/env perl
+
+use Data::Dumper;
+use Socket;
+use POSIX qw/:sys_wait_h strftime locale_h/;
+use Getopt::Long;
+use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID=>4, STAT_GID=>5, STAT_DEVIDENT=>6, STAT_SIZE=>7, STAT_ATIME=>8, STAT_MTIME=>9, STAT_CTIME=>10, STAT_PREFBLKSZ=>11, STAT_BLOCKS=>12 };
+
+@facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
+$i = 0;
+%facnum = map { $_=>$i++ } @facnam;
+@sevnam = qw/emerg alert crit error warning notice info debug/;
+$i = 0;
+%sevnum = map { $_=>$i++ } @sevnam;
+undef $i;
+$sevnum{'panic'} = 0;
+$sevnum{'err'} = 3;
+$sevnum{'warn'} = 4;
+$0 = "logwall";
+setlocale(LC_TIME, "C");
+
+
+$sock_listen = "/dev/log";
+$sock_connect = "/dev/logwall";
+$file_rules = "/etc/logwall/rules";
+
+GetOptions(
+    'l|listen=s'     => \$sock_listen,
+    'c|connect=s'     => \$sock_connect,
+    'r|rules=s'     => \$file_rules,
+)
+or die("Usage: $0 [-l <frontend socket>] [-c <backend socket>] [-r <rules file>]
+defaults: -l /dev/log -c /dev/logwall -r /etc/logwall/rules
+");
+
+
+
+sub yell {
+	# log ourself at syslog facility
+	my $str = sprintf("<%d>%s logwall[%d]: %s\n", 40 + $_[0]%8, strftime("%b %e %H:%M:%S", localtime), $$, $_[1]);
+	print STDERR $str;
+	print $backend $str;
+}
+
+sub logwall {
+	my $client = $_[0];
+	my ($log, $powner, $pgroup, $uid, $gid, $owner, $group);
+
+	if(defined $puid) { ($powner) = getpwuid $puid; }
+	if(defined $pgid) { ($pgroup) = getgrgid $pgid; }
+	if(defined $exe) {
+		($uid, $gid) = ((stat $exe)[STAT_UID, STAT_GID]);
+		($owner) = getpwuid $uid;
+		($group) = getgrgid $gid;
+	}
+	$args =~ s/[^\x20-\x7E]/sprintf '\x%0X', ord$&/eg;
+
+	socket($backend, AF_UNIX, SOCK_DGRAM, 0) or warn $!;
+	select $backend; $|++; select STDOUT;
+	connect($backend, $sock_connect_addr) or warn $!;
+	
+	local $/ = "\x00";
+	while(<$client>) {
+		my ($facility, $severity, $tag, $sourcename, $pid);
+		$log = $_;
+		s/^\x00//;
+		if(/^<(\d+)>\s*(?:\S+\s+){3}(\S+)/) {
+			my $priority = $1;
+			$tag = $2;
+			$facility = $priority >> 3;
+			$severity = $priority & 7;
+			($sourcename) = ($tag =~ /^([a-z0-9_\.,\/<>-]+)/i);
+			($pid) = ($tag =~ /\[(\d+)\]:?$/i);
+		}
+		else {
+			# FIXME
+		}
+		my $pass = 1;
+		
+		seek $rules, 0, 0;
+		local $/ = "\n";
+		RULES:
+		while(<$rules>) {
+			s/\s*$//;
+			
+			TESTS:
+			while(1) {
+			    if(/\s*([a-z]+)(==|!=|=~|!~|>=|<=|->|>|<|=)("[^""]*"|\S*)/) {
+				$_ = $';
+				my ($test, $op, $value) = ($1, $2, $3);
+				$value =~ /"([^""]+)"/ and $value = $1;
+				$test = lc $test;
+				if($test eq 'facility' and $value !~ /^\d+$/) {
+					if(not exists $facnum{$value}) { yell 3, "valid facility values: ".(join ', ', @facnam); }
+					$value = $facnum{$value};
+				}
+				elsif($test eq 'severity' and $value !~ /^\d+$/) {
+					if(not exists $sevnum{$value}) { yell 3, "valid severity values: ".(join ', ', @sevnam); }
+					$value = $sevnum{$value};
+				}
+
+				if($test eq 'then') {
+					$value = lc $value;
+					if($value eq 'drop') {		$pass = 0; last RULES; }
+					elsif($value eq 'accept') {	$pass = 1; last RULES; }
+					else { yell 3, "keyword 'then' takes arguments: drop, accept"; }
+				}
+				elsif($test eq 'log') {
+					$value = 7 if $value !~ /^\d$/;
+					yell $value, sprintf "realpid=$realpid puid=$puid pgid=$pgid powner=$powner pgroup=$pgroup exe=$exe args=%s uid=$uid gid=$gid owner=$owner group=$group ".
+						"facility=%s severity=%s tag=$tag sourcename=$sourcename pid=$pid", $args, $facnam[$facility], $sevnam[$severity];
+				}
+				elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename$/) {
+					$test_var = eval qq{\$$test};
+					if($op eq '==') { last TESTS unless $test_var eq $value; }
+					elsif($op eq '!=') { last TESTS unless $test_var ne $value; }
+					elsif($op eq '=~') { last TESTS unless $test_var =~ /$value/; }
+					elsif($op eq '!~') { last TESTS unless $test_var !~ /$value/; }
+					else {
+						yell 3, "keyword '$test' takes string comparasion operator, '$op' given";
+						last TESTS;
+					}
+				}
+				elsif($test =~ /^realpid|puid|pgid|uid|gid|facility|severity|pid$/) {
+					$test_var = eval qq{\$$test};
+					$value = int $value;
+					if($op =~ /^==|!=|>=|<=|>|<$/) {
+						last TESTS unless eval qq{$test_var $op $value};
+					}
+					else {
+						yell 3, "keyword '$test' takes numeric relation operator, '$op' given";
+						last TESTS;
+					}
+
+				}
+				else {
+					yell 3, "bareword in $file_rules on line $.; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, then";
+				}
+			    }
+			    else {
+				s/\s*(\x23.*)?$//;
+				if(length) {
+					yell 3, "parse syntax error in $file_rules on line $. near '$_'";
+				}
+				last TESTS;
+			    }
+			}
+		}
+	
+		if($pass) {
+			print $backend $log;
+		}
+	}
+	
+	close $backend;
+	close $client;
+}
+
+
+$SIG{'CHLD'} = \&bury;
+sub bury {
+	my @new;
+	for(@kids) {
+		my $w = waitpid $_, WNOHANG;
+		if($w == 0) { push @new, $_; }
+	}
+	@kids = @new;
+}
+
+
+
+
+$sock_listen_addr = sockaddr_un($sock_listen);
+$sock_connect_addr = sockaddr_un($sock_connect);
+
+open($rules, '<', $file_rules) or die "$file_rules: $!";
+#socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or warn $!;
+socket($frontend, AF_UNIX, SOCK_STREAM, 0) or warn $!;
+unlink($sock_listen);
+bind($frontend, $sock_listen_addr) or warn $!;
+chmod(0666, $sock_listen);
+chmod(0660, $sock_connect);
+listen($frontend, SOMAXCONN) or warn $!;
+
+
+ACCEPT:
+	undef $args;
+	1 while not accept($client, $frontend);
+
+	## race-condition ##
+	($realpid, $puid, $pgid) = unpack('lll', getsockopt($client, SOL_SOCKET, SO_PEERCRED));
+	$exe = readlink "/proc/$realpid/exe";
+	open $fh, '<', "/proc/$realpid/cmdline";
+	$args .= $_ while <$fh>;
+	close $fh;
+	
+	$kid = fork;
+	if(not defined $kid) {
+		warn $!;
+	}
+	elsif(not $kid) {
+		logwall $client;
+		exit;
+	}
+	else {
+		push @kids, $kid;
+	}
+goto ACCEPT;
+
