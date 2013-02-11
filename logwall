@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-use Data::Dumper;
+#use Data::Dumper;
 use Socket;
 use POSIX qw/:sys_wait_h strftime locale_h/;
 use Getopt::Long;
@@ -44,7 +44,7 @@ sub yell {
 
 sub logwall {
 	my $client = $_[0];
-	my ($log, $powner, $pgroup, $uid, $gid, $owner, $group);
+	my ($log, $powner, $pgroup, $uid, $gid, $owner, $group, $comm);
 
 	if(defined $puid) { ($powner) = getpwuid $puid; }
 	if(defined $pgid) { ($pgroup) = getgrgid $pgid; }
@@ -54,6 +54,18 @@ sub logwall {
 		($group) = getgrgid $gid;
 	}
 	$args =~ s/[^\x20-\x7E]/sprintf '\x%02X', ord$&/eg;
+
+	open $fh, '<', "/proc/$realpid/comm";
+	$comm .= $_ while <$fh>;
+	close $fh;
+	if(defined $comm) {
+		my $tmpstr = $comm;
+		$tmpstr =~ s/[\x00]/ /g;
+		$tmpstr =~ s/[\x0A\x0D]//g;
+		$tmpstr =~ s/[^\x20-\x7E]/./g;
+		$0 .= " ($tmpstr)";
+		undef $tmpstr;
+	}
 
 	socket($backend, AF_UNIX, SOCK_DGRAM, 0) or warn $!;
 	select $backend; $|++; select STDOUT;
@@ -85,7 +97,7 @@ sub logwall {
 			
 			TESTS:
 			while(1) {
-			    if(/\s*([a-z]+)(==|!=|=~|!~|>=|<=|->|>|<|=)("[^""]*"|\S*)/) {
+			    if(/^\s*([a-z]+)(==|!=|=~|!~|>=|<=|->|>|<|=)("[^""]*"|\S*)/) {
 				$_ = $';
 				my ($test, $op, $value) = ($1, $2, $3);
 				$value =~ /"([^""]+)"/ and $value = $1;
@@ -173,17 +185,25 @@ sub bury {
 $sock_listen_addr = sockaddr_un($sock_listen);
 $sock_connect_addr = sockaddr_un($sock_connect);
 
-open($rules, '<', $file_rules) or die "$file_rules: $!";
-#socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or warn $!;
-socket($frontend, AF_UNIX, SOCK_STREAM, 0) or warn $!;
+print STDERR "Ruleset: $file_rules: ";
+open($rules, '<', $file_rules) or die "$!";
+print STDERR "OK\n";
+
+print STDERR "Frontend: $sock_listen: ";
+#socket($frontend, AF_UNIX, SOCK_DGRAM, 0)
+socket($frontend, AF_UNIX, SOCK_STREAM, 0)
+  or die "$!";
 unlink($sock_listen);
-bind($frontend, $sock_listen_addr) or warn $!;
-chmod(0666, $sock_listen);
-chmod(0660, $sock_connect);
-listen($frontend, SOMAXCONN) or warn $!;
+bind($frontend, $sock_listen_addr) or die "$!";
+chmod(0666, $sock_listen) or warn "$!";
+chmod(0660, $sock_connect) or warn "$!";
+listen($frontend, SOMAXCONN) or die "$!";
+print STDERR "OK\n";
 
-
-ACCEPT:
+chdir "/";
+$fork = fork;
+if($fork == 0) {
+    ACCEPT:
 	undef $args;
 	1 while not accept($client, $frontend);
 
@@ -205,5 +225,11 @@ ACCEPT:
 	else {
 		push @kids, $kid;
 	}
-goto ACCEPT;
+    goto ACCEPT;
+}
+
+open PIDFILE, '>', "/var/run/logwall.pid";
+print PIDFILE $fork;
+close PIDFILE;
+print STDERR "logwall started, pid $fork\n";
 
