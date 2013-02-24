@@ -129,7 +129,7 @@ sub logwall {
 					elsif($op eq '=~') { last TESTS unless $test_var =~ /$value/; }
 					elsif($op eq '!~') { last TESTS unless $test_var !~ /$value/; }
 					else {
-						yell 3, "keyword '$test' takes string comparasion operator, '$op' given";
+						yell 3, "keyword '$test' takes string comparasion operator, '$op' given on line $.";
 						last TESTS;
 					}
 				}
@@ -140,7 +140,7 @@ sub logwall {
 						last TESTS unless eval qq{$test_var $op $value};
 					}
 					else {
-						yell 3, "keyword '$test' takes numeric relation operator, '$op' given";
+						yell 3, "keyword '$test' takes numeric relation operator, '$op' given on line $.";
 						last TESTS;
 					}
 
@@ -203,6 +203,7 @@ print STDERR "OK\n";
 chdir "/";
 $fork = fork;
 if($fork == 0) {
+    undef $fork;
     ACCEPT:
 	undef $args;
 	1 while not accept($client, $frontend);
