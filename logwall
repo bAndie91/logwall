@@ -16,6 +16,7 @@ undef $i;
 $sevnum{'panic'} = 0;
 $sevnum{'err'} = 3;
 $sevnum{'warn'} = 4;
+
 $0 = "logwall";
 setlocale(LC_TIME, "C");
 
@@ -23,13 +24,15 @@ setlocale(LC_TIME, "C");
 $sock_listen = "/dev/log";
 $sock_connect = "/dev/logwall";
 $file_rules = "/etc/logwall/rules";
+$quiet = 0;
 
 GetOptions(
-    'l|listen=s'     => \$sock_listen,
-    'c|connect=s'     => \$sock_connect,
+    'l|listen=s'    => \$sock_listen,
+    'c|connect=s'   => \$sock_connect,
     'r|rules=s'     => \$file_rules,
+    'q|quiet'       => \$quiet,
 )
-or die("Usage: $0 [-l <frontend socket>] [-c <backend socket>] [-r <rules file>]
+or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-r <rules file>]
 defaults: -l /dev/log -c /dev/logwall -r /etc/logwall/rules
 ");
 
@@ -38,7 +41,7 @@ defaults: -l /dev/log -c /dev/logwall -r /etc/logwall/rules
 sub yell {
 	# log ourself at syslog facility
 	my $str = sprintf("<%d>%s logwall[%d]: %s\n", 40 + $_[0]%8, strftime("%b %e %H:%M:%S", localtime), $$, $_[1]);
-	print STDERR $str;
+	print STDERR $str if !$quiet;
 	print $backend $str;
 }
 
@@ -185,11 +188,11 @@ sub bury {
 $sock_listen_addr = sockaddr_un($sock_listen);
 $sock_connect_addr = sockaddr_un($sock_connect);
 
-print STDERR "Ruleset: $file_rules: ";
+print STDERR "Ruleset: $file_rules: " if !$quiet;
 open($rules, '<', $file_rules) or die "$!";
-print STDERR "OK\n";
+print STDERR "OK\n" if !$quiet;
 
-print STDERR "Frontend: $sock_listen: ";
+print STDERR "Frontend: $sock_listen: " if !$quiet;
 #socket($frontend, AF_UNIX, SOCK_DGRAM, 0)
 socket($frontend, AF_UNIX, SOCK_STREAM, 0)
   or die "$!";
@@ -198,7 +201,7 @@ bind($frontend, $sock_listen_addr) or die "$!";
 chmod(0666, $sock_listen) or warn "$!";
 chmod(0660, $sock_connect) or warn "$!";
 listen($frontend, SOMAXCONN) or die "$!";
-print STDERR "OK\n";
+print STDERR "OK\n" if !$quiet;
 
 chdir "/";
 $fork = fork;
@@ -208,7 +211,7 @@ if($fork == 0) {
 	undef $args;
 	1 while not accept($client, $frontend);
 
-	## race-condition ##
+	## Race-Condition ##
 	($realpid, $puid, $pgid) = unpack('lll', getsockopt($client, SOL_SOCKET, SO_PEERCRED));
 	$exe = readlink "/proc/$realpid/exe";
 	open $fh, '<', "/proc/$realpid/cmdline";
@@ -232,5 +235,5 @@ if($fork == 0) {
 open PIDFILE, '>', "/var/run/logwall.pid";
 print PIDFILE $fork;
 close PIDFILE;
-print STDERR "logwall started, pid $fork\n";
+print STDERR "logwall started, pid $fork\n" if !$quiet;
 
