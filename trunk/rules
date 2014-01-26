@@ -1,14 +1,14 @@
 ##
-## logwall ruleset file
+## logwall(1) ruleset file
 ##
 ## syntax:
 ## <keyword><operator><value>
 ## there can be more keyword-operator-value tokens in one line
 ##
 ## keywords are:
-##   realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, then
+##   realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, then, log, rwlog
 ## operators are:
-##   ==  !=  =~  !~  <  >  <=  >=  =
+##   ==  !=  =~  !~  <  >  <=  >=  =  :=  ^=  +=
 ##
 
 
@@ -28,4 +28,4 @@ facility==local3   then=drop
 facility>=local1  facility<=local7   then=accept
 
 # drop policy
-log=info then=drop
+log=notice then=drop

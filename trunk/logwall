@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-#use Data::Dumper;
+use Data::Dumper;
 use Socket;
 use POSIX qw/:sys_wait_h strftime locale_h/;
 use Getopt::Long;
@@ -17,7 +17,7 @@ $sevnum{'panic'} = 0;
 $sevnum{'err'} = 3;
 $sevnum{'warn'} = 4;
 
-$0 = "logwall";
+$0 = "logwall " . join(" ", @ARGV);
 setlocale(LC_TIME, "C");
 
 
@@ -45,9 +45,15 @@ sub yell {
 	print $backend $str;
 }
 
+sub mklogline {
+	my ($facility, $severity, $datetime, $tag, $msg) = @_;
+	my $priority = ($facility << 3) + $severity;
+	return "<$priority>$datetime $tag $msg\x00";
+}
+
 sub logwall {
 	my $client = $_[0];
-	my ($log, $powner, $pgroup, $uid, $gid, $owner, $group, $comm);
+	($logline, $powner, $pgroup, $uid, $gid, $owner, $group, $comm) = undef;
 
 	if(defined $puid) { ($powner) = getpwuid $puid; }
 	if(defined $pgid) { ($pgroup) = getgrgid $pgid; }
@@ -76,86 +82,125 @@ sub logwall {
 	
 	local $/ = "\x00";
 	while(<$client>) {
-		my ($facility, $severity, $tag, $sourcename, $pid);
-		$log = $_;
-		s/^\x00//;
-		if(/^<(\d+)>\s*(?:\S+\s+){3}(\S+)/) {
-			my $priority = $1;
-			$tag = $2;
+		($facility, $severity, $datetime, $tag, $sourcename, $pid, $msg) = undef;
+		my $pass = 1;
+		my %rw;
+
+		$logline = $_;
+		s/\x00$//;
+		if(/^<(?'priority'\d+)>\s*(?'datetime'\S+\s+\S+\s+\S+)\s+(?'tag'\S+) /) {
+			$msg = $';
+			my $priority = $+{'priority'};
+			$datetime = $+{'datetime'};
+			$tag = $+{'tag'};
 			$facility = $priority >> 3;
 			$severity = $priority & 7;
-			($sourcename) = ($tag =~ /^([a-z0-9_\.,\/<>-]+)/i);
-			($pid) = ($tag =~ /\[(\d+)\]:?$/i);
+			($sourcename) = ($tag =~ /^([a-z0-9_\.,\/><-]+)/i);
+			($pid) = ($tag =~ /\[(\d+)\]:?$/);
 		}
 		else {
-			# FIXME
+			# FIXME: invalid logline
 		}
-		my $pass = 1;
 		
 		seek $rules, 0, 0;
 		local $/ = "\n";
+		$nl = 0;
 		RULES:
 		while(<$rules>) {
-			s/\s*$//;
+			$nl++;
 			
 			TESTS:
 			while(1) {
-			    if(/^\s*([a-z]+)(==|!=|=~|!~|>=|<=|->|>|<|=)("[^""]*"|\S*)/) {
+			    if(/^\s*([a-z]+)(==|!=|=~|=|!~|>=|<=|>|<|:=|^=|\+=)("[^""]*"|\S*)/) {
 				$_ = $';
 				my ($test, $op, $value) = ($1, $2, $3);
 				$value =~ /"([^""]+)"/ and $value = $1;
 				$test = lc $test;
+				
+				# convert string represented facility to facility number
 				if($test eq 'facility' and $value !~ /^\d+$/) {
 					if(not exists $facnum{$value}) { yell 3, "valid facility values: ".(join ', ', @facnam); }
 					$value = $facnum{$value};
 				}
-				elsif($test eq 'severity' and $value !~ /^\d+$/) {
+				# convert string represented severity to severity number
+				elsif($test =~ /^severity|rwlog|log$/ and $value !~ /^\d+$/) {
 					if(not exists $sevnum{$value}) { yell 3, "valid severity values: ".(join ', ', @sevnam); }
 					$value = $sevnum{$value};
 				}
 
+
 				if($test eq 'then') {
 					$value = lc $value;
-					if($value eq 'drop') {		$pass = 0; last RULES; }
-					elsif($value eq 'accept') {	$pass = 1; last RULES; }
+					if($value eq 'drop') { $pass = 0; last RULES; }
+					elsif($value eq 'accept') { $pass = 1; last RULES; }
 					else { yell 3, "keyword 'then' takes arguments: drop, accept"; }
 				}
 				elsif($test eq 'log') {
-					$value = 7 if $value !~ /^\d$/;
-					yell $value, sprintf "realpid=$realpid puid=$puid pgid=$pgid powner=$powner pgroup=$pgroup exe=$exe args=%s uid=$uid gid=$gid owner=$owner group=$group ".
-						"facility=%s severity=%s tag=$tag sourcename=$sourcename pid=$pid", $args, $facnam[$facility], $sevnam[$severity];
+					yell $value, sprintf "realpid=$realpid puid=$puid pgid=$pgid powner=$powner pgroup=$pgroup ".
+						"exe=$exe args=%s uid=$uid gid=$gid owner=$owner group=$group ".
+						"facility=%s severity=%s tag=$tag sourcename=$sourcename pid=$pid", 
+						$args, $facnam[$facility], $sevnam[$severity];
 				}
-				elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename$/) {
-					$test_var = eval qq{\$$test};
-					if($op eq '==') { last TESTS unless $test_var eq $value; }
-					elsif($op eq '!=') { last TESTS unless $test_var ne $value; }
-					elsif($op eq '=~') { last TESTS unless $test_var =~ /$value/; }
-					elsif($op eq '!~') { last TESTS unless $test_var !~ /$value/; }
+				elsif($test eq 'rwlog') {
+					yell $value, sprintf "facility=%s severity=%s tag=%s sourcename=%s pid=%s",
+						defined $rw{'facility'} ? $facnam[$rw{'facility'}] : "($facnam[$facility])",
+						defined $rw{'severity'} ? $sevnam[$rw{'severity'}] : "($sevnam[$severity])",
+						defined $rw{'tag'} ? $rw{'tag'} : "($tag)",
+						defined $rw{'sourcename'} ? $rw{'sourcename'} : "($sourcename)",
+						defined $rw{'pid'} ? $rw{'pid'} : "($pid)";
+				}
+				
+				elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg$/) {
+					$testx = $$test;
+					if($op eq '==') { last TESTS unless $testx eq $value; }
+					elsif($op eq '!=') { last TESTS unless $testx ne $value; }
+					elsif($op eq '=~') { last TESTS unless $testx =~ /$value/; }
+					elsif($op eq '!~') { last TESTS unless $testx !~ /$value/; }
+					elsif($op eq ':=' or $op eq '^=' or $op eq '+=') {
+						if($test =~ /^tag|sourcename|msg$/) {
+							$rw{$test} = $value if $op eq ':=';
+							$rw{$test} = $value.$testx if $op eq '^=';
+							$rw{$test} = $testx.$value if $op eq '+=';
+						}
+						else {
+							yell 3, "can not rewrite '$test' on line $nl";
+						}
+					}
 					else {
-						yell 3, "keyword '$test' takes string comparasion operator, '$op' given on line $.";
+						yell 3, "keyword '$test' takes string comparasion operator, but '$op' given on line $nl";
 						last TESTS;
 					}
 				}
 				elsif($test =~ /^realpid|puid|pgid|uid|gid|facility|severity|pid$/) {
-					$test_var = eval qq{\$$test};
+					$testx = $$test;
 					$value = int $value;
 					if($op =~ /^==|!=|>=|<=|>|<$/) {
-						last TESTS unless eval qq{$test_var $op $value};
+						last TESTS unless eval qq{$testx $op $value};
+					}
+					elsif($op eq ':=') {
+						if($test =~ /^facility|severity|pid$/) {
+							$rw{$test} = $value;
+						}
+						else {
+							yell 3, "can not rewrite '$test' on line $nl";
+							last TESTS;
+						}
 					}
 					else {
-						yell 3, "keyword '$test' takes numeric relation operator, '$op' given on line $.";
+						yell 3, "keyword '$test' takes numeric relation operator, nut '$op' given on line $nl";
 						last TESTS;
 					}
 
 				}
 				else {
-					yell 3, "bareword in $file_rules on line $.; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, then";
+					yell 3, "bareword in $file_rules on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, then, log";
 				}
 			    }
 			    else {
+				s/\s*$//;
 				s/\s*(\x23.*)?$//;
 				if(length) {
-					yell 3, "parse syntax error in $file_rules on line $. near '$_'";
+					yell 3, "parse syntax error in $file_rules on line $nl near '$_'";
 				}
 				last TESTS;
 			    }
@@ -163,7 +208,25 @@ sub logwall {
 		}
 	
 		if($pass) {
-			print $backend $log;
+			for my $var (qw/facility severity datetime pid msg/) {
+				$$var = defined $rw{$var} ? $rw{$var} : $$var;
+			}
+			if(defined $rw{'tag'}) {
+				$tag = $rw{'tag'};
+			}
+			else {
+				if(defined $rw{'sourcename'}) {
+					$tag = $rw{'sourcename'};
+				}
+				else {
+					($tag) = ($tag =~ /^([^:[]+)/);
+				}
+				if(defined $pid and $pid ne "") {
+					$tag .= "[$pid]";
+				}
+				$tag .= ":";
+			}
+			print $backend mklogline($facility, $severity, $datetime, $tag, $msg);
 		}
 	}
 	
@@ -211,7 +274,7 @@ if($fork == 0) {
 	undef $args;
 	1 while not accept($client, $frontend);
 
-	## Race-Condition ##
+	##<< Race-Condition >>##
 	($realpid, $puid, $pgid) = unpack('lll', getsockopt($client, SOL_SOCKET, SO_PEERCRED));
 	$exe = readlink "/proc/$realpid/exe";
 	open $fh, '<', "/proc/$realpid/cmdline";
