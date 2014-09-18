@@ -2,9 +2,10 @@
 
 use Data::Dumper;
 use Socket;
-use POSIX qw/:sys_wait_h strftime locale_h/;
+use POSIX qw/:sys_wait_h strftime locale_h setsid/;
 use Getopt::Long;
 use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID=>4, STAT_GID=>5, STAT_DEVIDENT=>6, STAT_SIZE=>7, STAT_ATIME=>8, STAT_MTIME=>9, STAT_CTIME=>10, STAT_PREFBLKSZ=>11, STAT_BLOCKS=>12 };
+
 
 @facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
 $i = 0;
@@ -23,24 +24,27 @@ setlocale(LC_TIME, "C");
 
 $sock_listen = "/dev/log";
 $sock_connect = "/dev/logwall";
-$file_rules = "/etc/logwall/rules";
+$rules_file = "/etc/logwall/rules";
+$pid_file = "/var/run/logwall.pid";
 $quiet = 0;
 
+Getopt::Long::Configure(qw/no_ignore_case/);
 GetOptions(
     'l|listen=s'    => \$sock_listen,
     'c|connect=s'   => \$sock_connect,
-    'r|rules=s'     => \$file_rules,
+    'r|rules=s'     => \$rules_file,
+    'P|pidfile=s'   => \$pid_file,
     'q|quiet'       => \$quiet,
 )
 or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-r <rules file>]
-defaults: -l /dev/log -c /dev/logwall -r /etc/logwall/rules
+defaults: -l $sock_listen -c $sock_connect -r $rules_file -P $pid_file
 ");
 
 
 
-sub yell {
+sub selflog {
 	# log ourself at syslog facility
-	my $str = sprintf("<%d>%s logwall[%d]: %s\n", 40 + $_[0]%8, strftime("%b %e %H:%M:%S", localtime), $$, $_[1]);
+	my $str = mklogline($facnum{'syslog'}, $_[0], strftime("%b %e %H:%M:%S", localtime), "logwall[$$]:", $_[1]);
 	print STDERR $str if !$quiet;
 	print $backend $str;
 }
@@ -51,52 +55,82 @@ sub mklogline {
 	return "<$priority>$datetime $tag $msg\x00";
 }
 
-sub logwall {
-	my $client = $_[0];
-	($logline, $powner, $pgroup, $uid, $gid, $owner, $group, $comm) = undef;
-
-	if(defined $puid) { ($powner) = getpwuid $puid; }
-	if(defined $pgid) { ($pgroup) = getgrgid $pgid; }
-	if(defined $exe) {
-		($uid, $gid) = ((stat $exe)[STAT_UID, STAT_GID]);
-		($owner) = getpwuid $uid;
-		($group) = getgrgid $gid;
-	}
-	$args =~ s/[^\x20-\x7E]/sprintf '\x%02X', ord$&/eg;
-
-	open $fh, '<', "/proc/$realpid/comm";
-	$comm .= $_ while <$fh>;
+sub peerdata {
+	my $args;
+	my @args;
+	my $comm;
+	my ($realpid, $puid, $pgid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
+	my $exe = readlink "/proc/$realpid/exe";
+	
+	open my $fh, '<', "/proc/$realpid/cmdline";
+	$args .= $_ while <$fh>;
 	close $fh;
-	if(defined $comm) {
-		my $tmpstr = $comm;
+	$args =~ s/\x00$//;
+	@args = split /\x00/, $args;
+	$args =~ s/\x00/ /g;
+	$args =~ s/[^\x20-\x7E]/sprintf '\x%02X', ord$&/eg;
+	
+	open my $fh, '<', "/proc/$realpid/comm";
+	$comm .= $_ while <$fh>;
+	$comm =~ s/[\r\n]*$//;
+	close $fh;
+	
+	return ($realpid, $puid, $pgid, $exe, $args, $comm, @args);
+}
+
+sub logwall {
+	my $client = shift;
+	my %PeerVar;
+	for my $varname (qw/realpid puid pgid exe args comm/) {
+		$PeerVar{$varname} = shift;
+	}
+	my @args = @_;
+
+	if(defined $PeerVar{"puid"}) {
+		($PeerVar{"powner"}) = getpwuid $PeerVar{"puid"};
+	}
+	if(defined $PeerVar{"pgid"}) {
+		($PeerVar{"pgroup"}) = getgrgid $PeerVar{"pgid"};
+	}
+	if(defined $PeerVar{"exe"}) {
+		($PeerVar{"uid"}, $PeerVar{"gid"}) = ((stat $PeerVar{"exe"})[STAT_UID, STAT_GID]);
+		($PeerVar{"owner"}) = getpwuid $PeerVar{"uid"};
+		($PeerVar{"group"}) = getgrgid $PeerVar{"gid"};
+	}
+
+	if(defined $PeerVar{"comm"}) {
+		my $tmpstr = $PeerVar{"comm"};
 		$tmpstr =~ s/[\x00]/ /g;
 		$tmpstr =~ s/[\x0A\x0D]//g;
 		$tmpstr =~ s/[^\x20-\x7E]/./g;
-		$0 .= " ($tmpstr)";
-		undef $tmpstr;
+		$0 = "logwall ($tmpstr)";
+	}
+	else {
+		$0 = "logwall (n/a)";
 	}
 
-	socket($backend, AF_UNIX, SOCK_DGRAM, 0) or warn $!;
+	socket($backend, AF_UNIX, SOCK_DGRAM, 0) or selflog $sevnum{'warn'}, $!;
 	select $backend; $|++; select STDOUT;
-	connect($backend, $sock_connect_addr) or warn $!;
+	connect($backend, $sock_connect_addr) or selflog $sevnum{'warn'}, $!;
 	
 	local $/ = "\x00";
 	while(<$client>) {
-		($facility, $severity, $datetime, $tag, $sourcename, $pid, $msg) = undef;
 		my $pass = 1;
 		my %rw;
+		my %Var = %PeerVar;
 
-		$logline = $_;
 		s/\x00$//;
 		if(/^<(?'priority'\d+)>\s*(?'datetime'\S+\s+\S+\s+\S+)\s+(?'tag'\S+) /) {
-			$msg = $';
+			$Var{"msg"} = $';
 			my $priority = $+{'priority'};
-			$datetime = $+{'datetime'};
-			$tag = $+{'tag'};
-			$facility = $priority >> 3;
-			$severity = $priority & 7;
-			($sourcename) = ($tag =~ /^([a-z0-9_\.,\/><-]+)/i);
-			($pid) = ($tag =~ /\[(\d+)\]:?$/);
+			$Var{"datetime"} = $+{'datetime'};
+			$Var{"tag"} = $+{'tag'};
+			$Var{"facility"} = $priority >> 3;
+			$Var{"severity"} = $priority & 7;
+			$Var{"facility_name"} = $facnam[$Var{"facility"}];
+			$Var{"severity_name"} = $sevnam[$Var{"severity"}];
+			($Var{"sourcename"}) = ($Var{"tag"} =~ /^([a-z0-9_\.,\/><-]+)/i);
+			($Var{"pid"}) = ($Var{"tag"} =~ /\[(\d+)\]:?$/);
 		}
 		else {
 			# FIXME: invalid logline
@@ -111,7 +145,7 @@ sub logwall {
 			
 			TESTS:
 			while(1) {
-			    if(/^\s*([a-z]+)(==|!=|=~|=|!~|>=|<=|>|<|:=|^=|\+=)("[^""]*"|\S*)/) {
+			    if(/^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|^=|\+=)("[^""]*"|\S*)/) {
 				$_ = $';
 				my ($test, $op, $value) = ($1, $2, $3);
 				$value =~ /"([^""]+)"/ and $value = $1;
@@ -119,12 +153,18 @@ sub logwall {
 				
 				# convert string represented facility to facility number
 				if($test eq 'facility' and $value !~ /^\d+$/) {
-					if(not exists $facnum{$value}) { yell 3, "valid facility values: ".(join ', ', @facnam); }
+					if(not exists $facnum{$value}) {
+						selflog $sevnum{'err'}, "invalid facility name '$value' on line $nl";
+						next TESTS;
+					}
 					$value = $facnum{$value};
 				}
 				# convert string represented severity to severity number
 				elsif($test =~ /^severity|rwlog|log$/ and $value !~ /^\d+$/) {
-					if(not exists $sevnum{$value}) { yell 3, "valid severity values: ".(join ', ', @sevnam); }
+					if(not exists $sevnum{$value}) {
+						selflog $sevnum{'err'}, "invalid severity name '$value' on line $nl";
+						next TESTS;
+					}
 					$value = $sevnum{$value};
 				}
 
@@ -133,29 +173,27 @@ sub logwall {
 					$value = lc $value;
 					if($value eq 'drop') { $pass = 0; last RULES; }
 					elsif($value eq 'accept') { $pass = 1; last RULES; }
-					else { yell 3, "keyword 'then' takes arguments: drop, accept"; }
+					else { selflog $sevnum{'err'}, "keyword 'then' takes arguments: drop, accept"; }
 				}
 				elsif($test eq 'log') {
-					yell $value, sprintf "realpid=$realpid puid=$puid pgid=$pgid powner=$powner pgroup=$pgroup ".
-						"exe=$exe args=%s uid=$uid gid=$gid owner=$owner group=$group ".
-						"facility=%s severity=%s tag=$tag sourcename=$sourcename pid=$pid", 
-						$args, $facnam[$facility], $sevnam[$severity];
+					selflog $value, join ' ', map { my $str=$Var{$_}; if($str=~/ /){ $str=~s/[""]/\\$&/g; $str="\"$str\""; } sprintf "%s=%s", $_, $str; }
+						qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid/;
 				}
 				elsif($test eq 'rwlog') {
-					yell $value, sprintf "facility=%s severity=%s tag=%s sourcename=%s pid=%s",
-						defined $rw{'facility'} ? $facnam[$rw{'facility'}] : "($facnam[$facility])",
-						defined $rw{'severity'} ? $sevnam[$rw{'severity'}] : "($sevnam[$severity])",
-						defined $rw{'tag'} ? $rw{'tag'} : "($tag)",
-						defined $rw{'sourcename'} ? $rw{'sourcename'} : "($sourcename)",
-						defined $rw{'pid'} ? $rw{'pid'} : "($pid)";
+					selflog $value, join ' ', 
+						sprintf("[rewrite] facility=%s severity=%s",
+							defined $rw{'facility'} ? $facnam[$rw{'facility'}] : "",
+							defined $rw{'severity'} ? $sevnam[$rw{'severity'}] : ""),
+						map { sprintf "%s=%s", $_, $rw{$_} } qw/tag sourcename pid/;
 				}
 				
 				elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg$/) {
-					$testx = $$test;
-					if($op eq '==') { last TESTS unless $testx eq $value; }
-					elsif($op eq '!=') { last TESTS unless $testx ne $value; }
-					elsif($op eq '=~') { last TESTS unless $testx =~ /$value/; }
-					elsif($op eq '!~') { last TESTS unless $testx !~ /$value/; }
+					if($op eq '==') { last TESTS unless $Var{$test} eq $value; }
+					elsif($op eq '!=') { last TESTS unless $Var{$test} ne $value; }
+					elsif($op eq '=~') { last TESTS unless $Var{$test} =~ /$value/; }
+					elsif($op eq '=*') { last TESTS unless $Var{$test} =~ /$value/i; }
+					elsif($op eq '!~') { last TESTS unless $Var{$test} !~ /$value/; }
+					elsif($op eq '!*') { last TESTS unless $Var{$test} !~ /$value/i; }
 					elsif($op eq ':=' or $op eq '^=' or $op eq '+=') {
 						if($test =~ /^tag|sourcename|msg$/) {
 							$rw{$test} = $value if $op eq ':=';
@@ -163,44 +201,43 @@ sub logwall {
 							$rw{$test} = $testx.$value if $op eq '+=';
 						}
 						else {
-							yell 3, "can not rewrite '$test' on line $nl";
+							selflog $sevnum{'err'}, "can not rewrite '$test' on line $nl";
 						}
 					}
 					else {
-						yell 3, "keyword '$test' takes string comparasion operator, but '$op' given on line $nl";
+						selflog $sevnum{'err'}, "keyword '$test' takes string comparasion operator, but '$op' given on line $nl";
 						last TESTS;
 					}
 				}
 				elsif($test =~ /^realpid|puid|pgid|uid|gid|facility|severity|pid$/) {
-					$testx = $$test;
 					$value = int $value;
 					if($op =~ /^==|!=|>=|<=|>|<$/) {
-						last TESTS unless eval qq{$testx $op $value};
+						last TESTS unless eval qq{$Var{$test} $op $value};
 					}
 					elsif($op eq ':=') {
 						if($test =~ /^facility|severity|pid$/) {
 							$rw{$test} = $value;
 						}
 						else {
-							yell 3, "can not rewrite '$test' on line $nl";
+							selflog $sevnum{'err'}, "can not rewrite '$test' on line $nl";
 							last TESTS;
 						}
 					}
 					else {
-						yell 3, "keyword '$test' takes numeric relation operator, nut '$op' given on line $nl";
+						selflog $sevnum{'err'}, "keyword '$test' takes numeric relation operator, nut '$op' given on line $nl";
 						last TESTS;
 					}
 
 				}
 				else {
-					yell 3, "bareword in $file_rules on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, then, log";
+					selflog $sevnum{'err'}, "bareword in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, then, log, rwlog";
 				}
 			    }
 			    else {
 				s/\s*$//;
 				s/\s*(\x23.*)?$//;
 				if(length) {
-					yell 3, "parse syntax error in $file_rules on line $nl near '$_'";
+					selflog $sevnum{'err'}, "parse syntax error in $rules_file on line $nl near '$_'";
 				}
 				last TESTS;
 			    }
@@ -209,24 +246,24 @@ sub logwall {
 	
 		if($pass) {
 			for my $var (qw/facility severity datetime pid msg/) {
-				$$var = defined $rw{$var} ? $rw{$var} : $$var;
+				$Var{$var} = defined $rw{$var} ? $rw{$var} : $Var{$var};
 			}
 			if(defined $rw{'tag'}) {
-				$tag = $rw{'tag'};
+				$Var{"tag"} = $rw{'tag'};
 			}
 			else {
 				if(defined $rw{'sourcename'}) {
-					$tag = $rw{'sourcename'};
+					$Var{"tag"} = $rw{'sourcename'};
 				}
 				else {
-					($tag) = ($tag =~ /^([^:[]+)/);
+					($Var{"tag"}) = ($Var{"tag"} =~ /^([^:[]+)/);
 				}
-				if(defined $pid and $pid ne "") {
-					$tag .= "[$pid]";
+				if(defined $Var{"pid"} and $Var{"pid"} ne "") {
+					$Var{"tag"} .= "[".$Var{"pid"}."]";
 				}
-				$tag .= ":";
+				$Var{"tag"} .= ":";
 			}
-			print $backend mklogline($facility, $severity, $datetime, $tag, $msg);
+			print $backend mklogline($Var{"facility"}, $Var{"severity"}, $Var{"datetime"}, $Var{"tag"}, $Var{"msg"});
 		}
 	}
 	
@@ -235,14 +272,21 @@ sub logwall {
 }
 
 
-$SIG{'CHLD'} = \&bury;
-sub bury {
-	my @new;
-	for(@kids) {
-		my $w = waitpid $_, WNOHANG;
-		if($w == 0) { push @new, $_; }
+sub libercid {
+	for my$pid (keys %kids) {
+		kill $_[0], $pid;
 	}
-	@kids = @new;
+	suicid();
+}
+sub bury {
+	for my$pid (keys %kids) {
+		my $w = waitpid $pid, WNOHANG;
+		delete $kids{$pid} if($w != 0);
+	}
+}
+sub suicid {
+	unlink $pid_file if defined $pid_file;
+	exit;
 }
 
 
@@ -251,52 +295,57 @@ sub bury {
 $sock_listen_addr = sockaddr_un($sock_listen);
 $sock_connect_addr = sockaddr_un($sock_connect);
 
-print STDERR "Ruleset: $file_rules: " if !$quiet;
-open($rules, '<', $file_rules) or die "$!";
+print STDERR "Ruleset: $rules_file: " if !$quiet;
+open($rules, '<', $rules_file) or die "$!";
 print STDERR "OK\n" if !$quiet;
 
 print STDERR "Frontend: $sock_listen: " if !$quiet;
-#socket($frontend, AF_UNIX, SOCK_DGRAM, 0)
-socket($frontend, AF_UNIX, SOCK_STREAM, 0)
-  or die "$!";
+#socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or die "$!\n";
+socket($frontend, AF_UNIX, SOCK_STREAM, 0) or die "$!\n";
 unlink($sock_listen);
-bind($frontend, $sock_listen_addr) or die "$!";
-chmod(0666, $sock_listen) or warn "$!";
-chmod(0660, $sock_connect) or warn "$!";
-listen($frontend, SOMAXCONN) or die "$!";
+bind($frontend, $sock_listen_addr) or die "$!\n";
+chmod(0666, $sock_listen) or warn "$!\n";
+chmod(0660, $sock_connect) or warn "$!\n";
+listen($frontend, SOMAXCONN) or die "$!\n";
 print STDERR "OK\n" if !$quiet;
 
-chdir "/";
+
 $fork = fork;
 if($fork == 0) {
-    undef $fork;
-    ACCEPT:
-	undef $args;
-	1 while not accept($client, $frontend);
+	close STDIN;
+	chdir "/";
+	setsid();
 
-	##<< Race-Condition >>##
-	($realpid, $puid, $pgid) = unpack('lll', getsockopt($client, SOL_SOCKET, SO_PEERCRED));
-	$exe = readlink "/proc/$realpid/exe";
-	open $fh, '<', "/proc/$realpid/cmdline";
-	$args .= $_ while <$fh>;
+	open $fh, '>', $pid_file;
+	print $fh $$;
 	close $fh;
+
+	$SIG{'TERM'} = $SIG{'QUIT'} = $SIG{'INT'} = \&libercid;
+	$SIG{'CHLD'} = \&bury;
+	$SIG{'HUP'} = \&suicid;
+
+    	ACCEPT:
+		1 while not accept($client, $frontend);
+
+		##<< Race-Condition >>##
+		($realpid, $puid, $pgid, $exe, $args, $comm, @args) = peerdata($client);
 	
-	$kid = fork;
-	if(not defined $kid) {
-		warn $!;
-	}
-	elsif(not $kid) {
-		logwall $client;
-		exit;
-	}
-	else {
-		push @kids, $kid;
-	}
-    goto ACCEPT;
+		$kid = fork;
+		if(not defined $kid) {
+			warn "$!\n";
+		}
+		elsif($kid == 0) {
+			undef %kids;
+			undef $pid_file;
+			logwall($client, $realpid, $puid, $pgid, $exe, $args, $comm, @args);
+			exit;
+		}
+		else {
+			$kids{$kid} = 1;
+		}
+	goto ACCEPT;
+	exit;
 }
 
-open PIDFILE, '>', "/var/run/logwall.pid";
-print PIDFILE $fork;
-close PIDFILE;
 print STDERR "logwall started, pid $fork\n" if !$quiet;
 
