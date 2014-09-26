@@ -1,22 +1,94 @@
 ##
 ## logwall(1) ruleset file
 ##
-## syntax:
-## <keyword><operator><value>
-## there can be more keyword-operator-value tokens in one line
+## Syntax:
+##   <keyword><operator><value>
+## There can be more keyword-operator-value triplets in one line
 ##
-## keywords are:
-##   realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, then, log, rwlog
-## operators are:
-##   ==  !=  =~  !~  <  >  <=  >=  =  :=  ^=  +=
+## Keywords are:
+##   Testing keywords:
+##     realpid*, puid*, pgid*, powner, pgroup, exe, uid*, gid*, owner, group, facility**, severity**, tag, sourcename, pid*
+##   Action keywords:
+##     then, log, rwlog
+## *=Takes numeric value
+## **=Takes numeric or facility or serverity value
+##
+## Operators are:
+##   ==  equal
+##   !=  not equal
+##   =~  regexp match
+##   !~  regexp not match
+##   =*  case insensitive regexp match
+##   !*  case insensitive regexp not match
+##   <   less
+##   >   greater
+##   <=  less or equal
+##   >=  greater or equal
+##   :=  rewrite
+##   ^=  rewrite: prepend
+##   +=  rewrite: append
+##   =   other (suitable for then, log and rwlog keywords)
+##
+## Name/number mapping:
+##   facility:
+##     0	kern
+##     1	user
+##     2	mail
+##     3	daemon
+##     4	auth
+##     5	syslog
+##     6	lpr
+##     7	news
+##     8	uucp
+##     9	cron
+##     10	authpriv
+##     11	ftp
+##     12	ntp
+##     13	audit
+##     14	alert
+##     15	clock
+##     16	local0
+##     17	local1
+##     18	local2
+##     19	local3
+##     20	local4
+##     21	local5
+##     22	local6
+##     23	local7
+##   severity:
+##     0	panic
+##     0	emerg
+##     1	alert
+##     2	crit
+##     3	err
+##     3	error
+##     4	warn
+##     4	warning
+##     5	notice
+##     6	info
+##     7	debug
+##
+## Rewritable properties:
+##   Prependable, appendable:
+##     tag, sourcename, msg
+##   Only rewritable:
+##     facility, severity, pid
+##
+## Examples:
+##   powner!=root then=drop
+##   severity>crit then=accept
+##   severity<=crit puid>=1000 log=info then=drop
+##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
 ##
 
 
 # log all logs
-#log=debug
+#log=debug rwlog=debug
 
 # most system processes
 puid<1000   then=accept
+
+exe==/sbin/unix_chkpwd   then=accept
 
 # we dont know the logger's credentials
 exe==""	 severity<error  log=info   then=drop
@@ -24,8 +96,8 @@ powner==""  severity<error  log=info   then=drop
 
 # allow only these for everyone else
 facility==user   then=accept
-facility==local3   then=drop
-facility>=local1  facility<=local7   then=accept
+facility>=local1  facility!=local3  facility<=local7   then=accept
 
 # drop policy
 log=notice then=drop
+
