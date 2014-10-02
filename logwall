@@ -339,6 +339,12 @@ sub suicid
 	unlink $pid_file if defined $pid_file;
 	exit;
 }
+sub early_die
+{
+	print STDERR $_[0] if $quiet;
+	print STDERR "$!\n";
+	exit int $!;
+}
 
 
 
@@ -346,19 +352,21 @@ sub suicid
 $sock_listen_addr = sockaddr_un($sock_listen);
 $sock_connect_addr = sockaddr_un($sock_connect);
 
-print STDERR "Ruleset: $rules_file: " if !$quiet;
-open($rules, '<', $rules_file) or die "$!";
-print STDERR "OK\n" if !$quiet;
+$str = "Ruleset: $rules_file: ";
+print STDERR $str if !$quiet;
+open($rules, '<', $rules_file) or early_die $str;
+print STDERR "Exists\n" if !$quiet;
 
-print STDERR "Frontend: $sock_listen: " if !$quiet;
-#socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or die "$!\n";
-socket($frontend, AF_UNIX, SOCK_STREAM, 0) or die "$!\n";
+$str = "Frontend: $sock_listen: ";
+print STDERR $str if !$quiet;
+#socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
+socket($frontend, AF_UNIX, SOCK_STREAM, 0) or early_die $str;
 unlink($sock_listen);
-bind($frontend, $sock_listen_addr) or die "$!\n";
-chmod(0666, $sock_listen) or warn "$!\n";
-chmod(0660, $sock_connect) or warn "$!\n";
-listen($frontend, SOMAXCONN) or die "$!\n";
-print STDERR "OK\n" if !$quiet;
+bind($frontend, $sock_listen_addr) or early_die $str;
+chmod(0666, $sock_listen) or warn ($quiet?$str:'')."$!\n";
+chmod(0660, $sock_connect) or warn ($quiet?$str:'')."$!\n";
+listen($frontend, SOMAXCONN) or early_die $str;
+print STDERR "Listening\n" if !$quiet;
 
 
 $fork = fork;
