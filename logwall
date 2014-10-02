@@ -357,6 +357,13 @@ print STDERR $str if !$quiet;
 open($rules, '<', $rules_file) or early_die $str;
 print STDERR "Exists\n" if !$quiet;
 
+$str = "Backend: $sock_connect: ";
+print STDERR $str if !$quiet;
+socket($backend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
+connect($backend, $sock_connect_addr) or early_die $str;
+close $backend;
+print STDERR "Tested\n" if !$quiet;
+
 $str = "Frontend: $sock_listen: ";
 print STDERR $str if !$quiet;
 #socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
