@@ -5,13 +5,22 @@
 ##   <keyword><operator><value>
 ## There can be more keyword-operator-value triplets in one line
 ##
-## Keywords are:
+## Keywords:
+##
 ##   Testing keywords:
-##     realpid*, puid*, pgid*, powner, pgroup, exe, uid*, gid*, owner, group, facility**, severity**, tag, sourcename, pid*
+##     Log message's attributes:
+##       facility**, severity**, level**, tag, sourcename, ident, pid*
+##     Logging process' attributes:
+##       realpid*, puid*, pgid*, powner, pgroup, exe
+##     Process' executable file's attributes:
+##       uid*, gid*, owner, group
+##
+##     *=Takes numeric value
+##     **=Takes numeric value or facility/serverity name
+##     aliases: severity - level, sourcename - ident
+##
 ##   Action keywords:
 ##     then, log, rwlog
-## *=Takes numeric value
-## **=Takes numeric or facility or serverity value
 ##
 ## Operators are:
 ##   ==  equal
@@ -87,6 +96,7 @@
 
 # most system processes
 puid<1000   then=accept
+pgid<1000   then=accept
 
 exe==/sbin/unix_chkpwd   then=accept
 
