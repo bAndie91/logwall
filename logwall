@@ -168,6 +168,8 @@ sub logwall
 					my ($test, $op, $value) = ($1, $2, $3);
 					$value =~ /"([^""]+)"/ and $value = $1;
 					$test = lc $test;
+					$test = "sourcename" if $test eq "ident";
+					$test = "severity" if $test eq "level";
 				
 					# convert string represented facility to facility number
 					if($test eq 'facility' and $value !~ /^\d+$/)
@@ -210,7 +212,8 @@ sub logwall
 							sprintf("[rewrite] facility=%s severity=%s",
 								defined $rw{'facility'} ? $facnam[$rw{'facility'}] : "",
 								defined $rw{'severity'} ? $sevnam[$rw{'severity'}] : ""),
-							map { sprintf "%s=%s", $_, $rw{$_} } qw/tag sourcename pid/;
+							map { sprintf "%s=%s", $_, $rw{$_} } qw/tag sourcename pid msg/,
+							"orig_msg=$Var{'msg'}";
 					}
 				
 					elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg$/)
@@ -226,8 +229,8 @@ sub logwall
 							if($test =~ /^tag|sourcename|msg$/)
 							{
 								$rw{$test} = $value if $op eq ':=';
-								$rw{$test} = $value.$testx if $op eq '^=';
-								$rw{$test} = $testx.$value if $op eq '+=';
+								$rw{$test} = $value.$Var{$test} if $op eq '^=';
+								$rw{$test} = $Var{$test}.$value if $op eq '+=';
 							}
 							else
 							{
@@ -287,27 +290,27 @@ sub logwall
 		{
 			for my $var (qw/facility severity datetime pid msg/)
 			{
-				$Var{$var} = defined $rw{$var} ? $rw{$var} : $Var{$var};
+				$Var{$var} = $rw{$var} if defined $rw{$var};
 			}
 			if(defined $rw{'tag'})
 			{
-				$Var{"tag"} = $rw{'tag'};
+				$Var{'tag'} = $rw{'tag'};
 			}
 			else
 			{
 				if(defined $rw{'sourcename'})
 				{
-					$Var{"tag"} = $rw{'sourcename'};
+					$Var{'tag'} = $rw{'sourcename'};
 				}
 				else
 				{
-					($Var{"tag"}) = ($Var{"tag"} =~ /^([^:[]+)/);
+					($Var{'tag'}) = ($Var{'tag'} =~ /^([^:[]+)/);
 				}
 				if(defined $Var{"pid"} and $Var{"pid"} ne "")
 				{
-					$Var{"tag"} .= "[".$Var{"pid"}."]";
+					$Var{'tag'} .= "[".$Var{"pid"}."]";
 				}
-				$Var{"tag"} .= ":";
+				$Var{'tag'} .= ":";
 			}
 			print $backend mklogline($Var{"facility"}, $Var{"severity"}, $Var{"datetime"}, $Var{"tag"}, $Var{"msg"});
 		}
