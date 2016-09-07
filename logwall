@@ -90,7 +90,7 @@ sub logwall
 		$PeerVar{$varname} = shift;
 	}
 	my @args = @_;
-
+	
 	if(defined $PeerVar{"puid"})
 	{
 		($PeerVar{"powner"}) = getpwuid $PeerVar{"puid"};
@@ -112,11 +112,11 @@ sub logwall
 		$tmpstr =~ s/[\x00]/ /g;
 		$tmpstr =~ s/[\x0A\x0D]//g;
 		$tmpstr =~ s/[^\x20-\x7E]/./g;
-		$0 = "logwall ($tmpstr)";
+		$0 = "logwall: ".$PeerVar{"realpid"}." ".$tmpstr;
 	}
 	else
 	{
-		$0 = "logwall (n/a)";
+		$0 = "logwall: ".$PeerVar{"realpid"};
 	}
 
 	socket($backend, AF_UNIX, SOCK_DGRAM, 0) or selflog $sevnum{'warn'}, $!;
@@ -148,7 +148,9 @@ sub logwall
 		}
 		else
 		{
-			# FIXME: invalid logline
+			s/[\r\n]/sprintf "\\x%02X", ord($&)/eg;
+			selflog $sevnum{'error'}, "Invalid: $_\n";
+			next;
 		}
 		
 		seek $rules, 0, 0;
@@ -228,6 +230,10 @@ sub logwall
 						{
 							if($test =~ /^tag|sourcename|msg$/)
 							{
+								for my $varname (keys %Var)
+								{
+									$value =~ s/\{\{$varname\}\}/$Var{$varname}/g;
+								}
 								$rw{$test} = $value if $op eq ':=';
 								$rw{$test} = $value.$Var{$test} if $op eq '^=';
 								$rw{$test} = $Var{$test}.$value if $op eq '+=';
