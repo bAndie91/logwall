@@ -105,7 +105,7 @@ sub logwall
 		($PeerVar{"owner"}) = getpwuid $PeerVar{"uid"};
 		($PeerVar{"group"}) = getgrgid $PeerVar{"gid"};
 	}
-
+	
 	if(defined $PeerVar{"comm"})
 	{
 		my $tmpstr = $PeerVar{"comm"};
@@ -118,13 +118,24 @@ sub logwall
 	{
 		$0 = "logwall: ".$PeerVar{"realpid"};
 	}
-
-	socket($backend, AF_UNIX, SOCK_DGRAM, 0) or selflog $sevnum{'warn'}, $!;
-	select $backend; $|++; select STDOUT;
-	connect($backend, $sock_connect_addr) or selflog $sevnum{'warn'}, $!;
 	
-	# duplicate filehandle
-	open my $rules, '<&='.fileno($Rules_fd);
+	if(!socket($backend, AF_UNIX, SOCK_DGRAM, 0))
+	{
+		selflog $sevnum{'crit'}, $!;
+		return 0;
+	}
+	select $backend; $|++; select STDOUT;
+	if(!connect($backend, $sock_connect_addr))
+	{
+		selflog $sevnum{'crit'}, $!;
+		return 0;
+	}
+	
+	if(!open my $rules, '<', $rules_file)
+	{
+		selflog $sevnum{'crit'}, $!;
+		return 0;
+	}
 	
 	local $/ = "\x00";
 	while(<$client>)
@@ -326,6 +337,7 @@ sub logwall
 	
 	close $backend;
 	close $client;
+	close $rules;
 }
 
 
@@ -367,6 +379,7 @@ $str = "Ruleset: $rules_file: ";
 print STDERR $str if !$quiet;
 open($Rules_fd, '<', $rules_file) or early_die $str;
 print STDERR "Exists\n" if !$quiet;
+close $Rules_fd;
 
 $str = "Backend: $sock_connect: ";
 print STDERR $str if !$quiet;
