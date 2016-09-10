@@ -37,6 +37,7 @@
 ##   :=  rewrite
 ##   ^=  prepend
 ##   +=  append
+##   :~  regexp substitution
 ##   =   other (use this for then, log and rwlog keywords)
 ##
 ## Name/number mapping:
@@ -84,24 +85,40 @@
 ##   Only rewritable:
 ##     facility, severity, pid
 ##
-## Variable substitution on rewriting:
+## Variable substitution:
 ##   Testing keywords are substituted with theirs value, eg:
 ##   msg^="user={{powner}} "
+##
+## Regexp substitution:
+##   Separate the pattern and the replacement with tilde `~' mark, eg:
+##   msg:~error~ERROR
+##   Use embedded notation for case insensitivity, eg:
+##   msg:~(?i)error~ERROR
+##   Use hex char notation to match tilde literally, eg:
+##   msg:~\x7E~tilde
+##   Substitution is global by default, be tricky if you have to, eg:
+##   msg:~(?i)error(.*)~ERROR$1
+##   Regexp variables usable in replacement string are limited to:
+##   $1 .. $9, $+, $`, $& and $'
 ##
 ## Examples:
 ##   powner!=root then=drop
 ##   severity>crit then=accept
 ##   severity<=crit puid>=1000 log=info then=drop
 ##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
+##   powner==nobody log=debug,ALL,-comm,-args
+##   msg^=test: rwlog=debug
+##   msg^=test: rwlog=debug,ALL
+##   msg^=test: rwlog=debug,ALLRW,powner,pgroup,exe
 ##
 
 
 # log all logs
 #log=debug rwlog=debug
 
+
 # most system processes
 puid<1000   then=accept
-pgid<1000   then=accept
 
 exe==/sbin/unix_chkpwd   then=accept
 

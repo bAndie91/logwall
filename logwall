@@ -17,6 +17,8 @@ undef $i;
 $sevnum{'panic'} = 0;
 $sevnum{'err'} = 3;
 $sevnum{'warn'} = 4;
+%Names = ('severity' => \%sevnam, 'facility' => \%facnam, );
+%Numbs = ('severity' => \%sevnum, 'facility' => \%facnum, );
 
 $0 = "logwall " . join(" ", @ARGV);
 setlocale(LC_TIME, "C");
@@ -41,6 +43,18 @@ defaults: -l $sock_listen -c $sock_connect -r $rules_file -P $pid_file
 ");
 
 
+
+sub repl
+{
+	my $repl;
+	my %D;
+	my @grp;
+	($repl, $D{'&'}, $D{'`'}, $D{"'"}, $D{'+'}, @grp) = @_;
+	my $n = 0;
+	map { $D{++$n} = $_; } @grp;
+	$repl =~ s/\$(\x26\x60\x27\+[1-9])/$D{$1}/g;
+	return $repl;
+}
 
 sub selflog
 {
@@ -84,6 +98,7 @@ sub peerdata
 sub logwall
 {
 	my $client = shift;
+	my $rules;
 	my %PeerVar;
 	for my $varname (qw/realpid puid pgid exe args comm/)
 	{
@@ -131,7 +146,7 @@ sub logwall
 		return 0;
 	}
 	
-	if(!open my $rules, '<', $rules_file)
+	if(!open $rules, '<', $rules_file)
 	{
 		selflog $sevnum{'crit'}, $!;
 		return 0;
@@ -177,7 +192,7 @@ sub logwall
 			TESTS:
 			while(1)
 			{
-			    if(/^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=)("[^""]*"|\S*)/)
+			    if(/^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
 			    {
 					$_ = $';
 					my ($test, $op, $value) = ($1, $2, $3);
@@ -185,29 +200,18 @@ sub logwall
 					$test = lc $test;
 					$test = "sourcename" if $test eq "ident";
 					$test = "severity" if $test eq "level";
-				
-					# convert string represented facility to facility number
-					if($test eq 'facility' and $value !~ /^\d+$/)
+					
+					# convert string-represented facility/severity to facility/severity number
+					if($test ~~ ['facility', 'severity'] and $value !~ /^\d+$/)
 					{
-						if(not exists $facnum{$value})
+						if(not exists $Numbs{$test}->{$value})
 						{
-							selflog $sevnum{'err'}, "invalid facility name '$value' on line $nl";
+							selflog $sevnum{'err'}, "invalid $test name '$value' on line $nl";
 							next TESTS;
 						}
-						$value = $facnum{$value};
+						$value = $Numbs{$test}->{$value};
 					}
-					# convert string represented severity to severity number
-					elsif($test =~ /^severity|rwlog|log$/ and $value !~ /^\d+$/)
-					{
-						if(not exists $sevnum{$value})
-						{
-							selflog $sevnum{'err'}, "invalid severity name '$value' on line $nl";
-							next TESTS;
-						}
-						$value = $sevnum{$value};
-					}
-
-
+					
 					if($test eq 'then')
 					{
 						$value = lc $value;
@@ -215,22 +219,69 @@ sub logwall
 						elsif($value eq 'accept') { $pass = 1; last RULES; }
 						else { selflog $sevnum{'err'}, "keyword 'then' takes arguments: drop, accept"; }
 					}
-					elsif($test eq 'log')
+					elsif($test ~~ ['log', 'rwlog'])
 					{
-						selflog $value, join ' ', 
-							map { my $str=$Var{$_}; if($str=~/ /){ $str=~s/[""]/\\$&/g; $str="\"$str\""; } sprintf "%s=%s", $_, $str; }
-							qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid/;
+						my @all = qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid/;
+						my ($wlevel, @attrs) = split ',', $value;
+						if($wlevel !~ /^\d+$/)
+						{
+							if(not exists $sevnum{$wlevel})
+							{
+								selflog $sevnum{'err'}, "invalid severity name '$wlevel' on line $nl";
+								next TESTS;
+							}
+							$wlevel = $sevnum{$wlevel};
+						}
+						
+						if(not @attrs)
+						{
+							if($test eq 'log')
+							{
+								@attrs = @all;
+							}
+							elsif($test eq 'rwlog')
+							{
+								@attrs = keys %rw;
+							}
+						}
+						else
+						{
+							my @newattrs;
+							for my $attr (@attrs)
+							{
+								if($attr eq 'ALL')
+								{
+									push @newattrs, @all;
+								}
+								elsif($attr eq 'ALLRW')
+								{
+									push @newattrs, keys %rw;
+								}
+								elsif($attr =~ /^-(.+)/)
+								{
+									my $a = $1;
+									@newattrs = grep { $_ ne $a; } @newattrs;
+								}
+								else
+								{
+									push @newattrs, $attr;
+								}
+							}
+							@attrs = @newattrs;
+						}
+						
+						selflog $wlevel, join ' ', map
+						{
+							my $str = $Var{$_};
+							if($str =~ / /)
+							{
+								$str =~ s/[\x22\x5C]/\\$&/g;
+								$str="\"$str\"";
+							}
+							sprintf "%s=%s", $_, $str;
+						}@attrs;
 					}
-					elsif($test eq 'rwlog')
-					{
-						selflog $value, join ' ', 
-							sprintf("[rewrite] facility=%s severity=%s",
-								defined $rw{'facility'} ? $facnam[$rw{'facility'}] : "",
-								defined $rw{'severity'} ? $sevnam[$rw{'severity'}] : ""),
-							map { sprintf "%s=%s", $_, $rw{$_} } qw/tag sourcename pid msg/,
-							"orig_msg=$Var{'msg'}";
-					}
-				
+					
 					elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg$/)
 					{
 						if($op eq '==') { last TESTS unless $Var{$test} eq $value; }
@@ -239,7 +290,7 @@ sub logwall
 						elsif($op eq '=*') { last TESTS unless $Var{$test} =~ /$value/i; }
 						elsif($op eq '!~') { last TESTS unless $Var{$test} !~ /$value/; }
 						elsif($op eq '!*') { last TESTS unless $Var{$test} !~ /$value/i; }
-						elsif($op eq ':=' or $op eq '^=' or $op eq '+=')
+						elsif($op ~~ [':=', '^=', '+=', ':~'])
 						{
 							if($test =~ /^tag|sourcename|msg$/)
 							{
@@ -250,18 +301,24 @@ sub logwall
 								$rw{$test} = $value if $op eq ':=';
 								$rw{$test} = $value.$Var{$test} if $op eq '^=';
 								$rw{$test} = $Var{$test}.$value if $op eq '+=';
+								if($op eq ':~')
+								{
+									my ($patt, $repl) = split '~', $value, 2;
+									$rw{$test} =~ s{$patt}{repl($repl, $&, $`, $', $+, $1, $2, $3, $4, $5, $6, $7, $8, $9)}eg;
+								}
 							}
 							else
 							{
-								selflog $sevnum{'err'}, "can not rewrite '$test' on line $nl";
+								selflog $sevnum{'err'}, "attribute '$test' is not rewritable on line $nl";
 							}
 						}
 						else
 						{
-							selflog $sevnum{'err'}, "keyword '$test' takes string comparasion operator, but '$op' given on line $nl";
+							selflog $sevnum{'err'}, "keyword '$test' takes string comparasion or rewrite operator, but '$op' was found on line $nl";
 							last TESTS;
 						}
 					}
+					
 					elsif($test =~ /^realpid|puid|pgid|uid|gid|facility|severity|pid$/)
 					{
 						$value = int $value;
@@ -271,19 +328,24 @@ sub logwall
 						}
 						elsif($op eq ':=')
 						{
-							if($test =~ /^facility|severity|pid$/)
+							if($test =~ /^facility|severity$/)
+							{
+								$rw{$test} = $value;
+								$rw{$test.'_name'} = $Names{$test}->{$value};
+							}
+							elsif($test eq 'pid')
 							{
 								$rw{$test} = $value;
 							}
 							else
 							{
-								selflog $sevnum{'err'}, "can not rewrite '$test' on line $nl";
+								selflog $sevnum{'err'}, "attribute '$test' is not rewritable on line $nl";
 								last TESTS;
 							}
 						}
 						else
 						{
-							selflog $sevnum{'err'}, "keyword '$test' takes numeric relation operator, nut '$op' given on line $nl";
+							selflog $sevnum{'err'}, "keyword '$test' takes numeric relation or ':=' operator, but '$op' was found on line $nl";
 							last TESTS;
 						}
 					}
@@ -325,13 +387,13 @@ sub logwall
 				{
 					($Var{'tag'}) = ($Var{'tag'} =~ /^([^:[]+)/);
 				}
-				if(defined $Var{"pid"} and $Var{"pid"} ne "")
+				if(defined $Var{'pid'} and $Var{'pid'} ne '')
 				{
-					$Var{'tag'} .= "[".$Var{"pid"}."]";
+					$Var{'tag'} .= "[".$Var{'pid'}."]";
 				}
-				$Var{'tag'} .= ":";
+				$Var{'tag'} .= ':';
 			}
-			print $backend mklogline($Var{"facility"}, $Var{"severity"}, $Var{"datetime"}, $Var{"tag"}, $Var{"msg"});
+			print $backend mklogline($Var{'facility'}, $Var{'severity'}, $Var{'datetime'}, $Var{'tag'}, $Var{'msg'});
 		}
 	}
 	
