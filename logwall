@@ -454,6 +454,7 @@ $str = "Frontend: $sock_listen: ";
 print STDERR $str if !$quiet;
 #socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
 socket($frontend, AF_UNIX, SOCK_STREAM, 0) or early_die $str;
+#setsockopt($frontend, SOL_SOCKET, SO_PASSCRED, 1);
 unlink($sock_listen);
 bind($frontend, $sock_listen_addr) or early_die $str;
 chmod(0666, $sock_listen) or warn ($quiet?$str:'')."$!\n";

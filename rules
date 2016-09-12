@@ -21,27 +21,31 @@
 ##     aliases: severity = level, sourcename = ident
 ##
 ##   Action keywords:
-##     then, log, rwlog
+##     jump, log, rwlog
 ##
 ## Operators:
-##   ==  equal
-##   !=  not equal
-##   =~  regexp match
-##   !~  regexp not match
-##   =*  case insensitive regexp match
-##   !*  case insensitive regexp not match
-##   <   less
-##   >   greater
-##   <=  less or equal
-##   >=  greater or equal
-##   :=  rewrite
-##   ^=  prepend
-##   +=  append
-##   :~  regexp substitution
-##   =   other (use this for then, log and rwlog keywords)
+##   Numeric and string operators:
+##     ==  equal
+##     !=  not equal
+##   Numeric operators:
+##     <   less
+##     >   greater
+##     <=  less or equal
+##     >=  greater or equal
+##   String operators:
+##     =~  regexp match
+##     !~  regexp not match
+##     =*  case insensitive regexp match
+##     !*  case insensitive regexp not match
+##   Rewrite operators
+##     :=  overwrite
+##     ^=  prepend
+##     +=  append
+##     :~  regexp substitution
+##   Other:
+##     =   use this with action keywords
 ##
-## Name/number mapping:
-##   facility:
+## Facilities:
 ##     0	kern
 ##     1	user
 ##     2	mail
@@ -66,7 +70,8 @@
 ##     21	local5
 ##     22	local6
 ##     23	local7
-##   severity:
+##
+## Severities:
 ##     0	panic
 ##     0	emerg
 ##     1	alert
@@ -87,7 +92,7 @@
 ##
 ## Variable substitution:
 ##   Testing keywords are substituted with theirs value, eg:
-##   msg^="user={{powner}} "
+##   facility==user sourcename+="-{{powner}}"
 ##
 ## Regexp substitution:
 ##   Separate the pattern and the replacement with tilde `~' mark, eg:
@@ -101,35 +106,55 @@
 ##   Regexp variables usable in replacement string are limited to:
 ##   $1 .. $9, $+, $`, $& and $'
 ##
+## Internal logging for debugging
+##   [log|rwlog]=SEVERITY,ATTRIBUTES
+##   ATTRIBUTES: [-]<testing keyword>, "ALL", "RWALL"
+##   ALL expands to realpid,puid,pgid,powner,pgroup,exe,comm,args,uid,gid,owner,group,facility_name,severity_name,tag,sourcename,pid
+##   RWALL expands to all rewritten attributes
+##   Examples:
+##     powner==nobody  log=debug,ALL,-comm,-args
+##     tag=~/  log=debug,ALL,-uid,-gid,-owner,-group,msg
+##     sourcename==test  msg:~test~TEST  rwlog=info
+##     sourcename==test  msg^="test: "  rwlog=debug,ALLRW,powner,pgroup,exe
+##
 ## Examples:
-##   powner!=root then=drop
-##   severity>crit then=accept
-##   severity<=crit puid>=1000 log=info then=drop
+##   powner!=root jump=drop
+##   severity>crit jump=accept
+##   severity<=crit puid>=1000 log=info jump=drop
 ##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
-##   powner==nobody log=debug,ALL,-comm,-args
-##   msg^=test: rwlog=debug
-##   msg^=test: rwlog=debug,ALL
-##   msg^=test: rwlog=debug,ALLRW,powner,pgroup,exe
 ##
 
+
+### Rewrites ###
+
+sourcename=*cron sourcename:=cron
+sourcename==cupsd powner==root facility==user facility:=lpr
+sourcename==/etc/mysql/debian-start sourcename:=mysqld-debian
+sourcename==/etc/init.d/mysql sourcename:=mysqld-debian
+sourcename==apcupsd msg=~"Power failure" severity:=crit
 
 # log all logs
 #log=debug rwlog=debug
 
 
-# most system processes
-puid<1000   then=accept
+### Filters ###
 
-exe==/sbin/unix_chkpwd   then=accept
+# most system processes
+puid<1000 jump=accept
+
+# trusted programms
+exe==/sbin/unix_chkpwd jump=accept
+exe==/usr/bin/sudo jump=accept
+exe==/bin/su jump=accept
 
 # we dont know the logger's credentials
-exe==""	 severity<error  log=info   then=drop
-powner==""  severity<error  log=info   then=drop
+exe=="" severity<error log=info jump=drop
+powner=="" severity<error log=info jump=drop
 
 # allow only these for everyone else
-facility==user   then=accept
-facility>=local1  facility!=local3  facility<=local7   then=accept
+facility==user jump=accept
+facility>=local1 facility!=local3 facility<=local7 jump=accept
 
 # drop policy
-log=notice then=drop
+log=notice,ALL,msg jump=drop
 
