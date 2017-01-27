@@ -56,6 +56,14 @@ sub repl
 	return $repl;
 }
 
+sub resolvealias
+{
+	my $a = shift;
+	$a = "sourcename" if $a eq "ident";
+	$a = "severity" if $a eq "level";
+	return $a;
+}
+
 sub selflog
 {
 	# log ourself at syslog facility
@@ -159,6 +167,7 @@ sub logwall
 		my %rw;
 		my %Var = %PeerVar;
 		
+		LOG_PACKET:
 		s/\x00$//;
 		if(/^<(?'priority'\d+)>\s*(?'datetime'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ ]?0*([12]?[0-9]|3[01]) 0*(1?[0-9]|2[0-3])(:0*([1-5]?[0-9])){2})\s+(?'tag'\S+) / ||
 		   /^<(?'priority'\d+)>\s*(?'tag'\S+) /)
@@ -197,9 +206,7 @@ sub logwall
 					$_ = $';
 					my ($test, $op, $value) = ($1, $2, $3);
 					$value =~ /"([^""]+)"/ and $value = $1;
-					$test = lc $test;
-					$test = "sourcename" if $test eq "ident";
-					$test = "severity" if $test eq "level";
+					$test = resolvealias(lc $test);
 					
 					# convert string-represented facility/severity to facility/severity number
 					if($test ~~ ['facility', 'severity'] and $value !~ /^\d+$/)
@@ -212,12 +219,12 @@ sub logwall
 						$value = $Numbs{$test}->{$value};
 					}
 					
-					if($test eq 'then')
+					if($test eq 'then' or $test eq 'jump')
 					{
 						$value = lc $value;
 						if($value eq 'drop') { $pass = 0; last RULES; }
 						elsif($value eq 'accept') { $pass = 1; last RULES; }
-						else { selflog $sevnum{'err'}, "keyword 'then' takes arguments: drop, accept"; }
+						else { selflog $sevnum{'err'}, "keyword '$test' takes arguments: drop, accept"; }
 					}
 					elsif($test ~~ ['log', 'rwlog'])
 					{
@@ -294,10 +301,7 @@ sub logwall
 						{
 							if($test =~ /^tag|sourcename|msg$/)
 							{
-								for my $varname (keys %Var)
-								{
-									$value =~ s/\{\{$varname\}\}/$Var{$varname}/g;
-								}
+								$value =~ s/\{\{(.+?)\}\}/$Var{resolvealias($1)}/eg;
 								$rw{$test} = $value if $op eq ':=';
 								$rw{$test} = $value.$Var{$test} if $op eq '^=';
 								$rw{$test} = $Var{$test}.$value if $op eq '+=';
@@ -351,7 +355,7 @@ sub logwall
 					}
 					else
 					{
-						selflog $sevnum{'err'}, "bareword in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, then, log, rwlog";
+						selflog $sevnum{'err'}, "bareword in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, jump, log, rwlog";
 					}
 			    }
 			    else
@@ -454,7 +458,7 @@ $str = "Frontend: $sock_listen: ";
 print STDERR $str if !$quiet;
 #socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
 socket($frontend, AF_UNIX, SOCK_STREAM, 0) or early_die $str;
-#setsockopt($frontend, SOL_SOCKET, SO_PASSCRED, 1);
+setsockopt($frontend, SOL_SOCKET, SO_PASSCRED, 1);
 unlink($sock_listen);
 bind($frontend, $sock_listen_addr) or early_die $str;
 chmod(0666, $sock_listen) or warn ($quiet?$str:'')."$!\n";
