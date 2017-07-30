@@ -193,6 +193,7 @@ sub logwall
 		seek $rules, 0, 0;
 		local $/ = "\n";
 		$nl = 0;
+		
 		RULES:
 		while(<$rules>)
 		{
@@ -289,7 +290,7 @@ sub logwall
 						}@attrs;
 					}
 					
-					elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg$/)
+					elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg|comm$/)
 					{
 						if($op eq '==') { last TESTS unless $Var{$test} eq $value; }
 						elsif($op eq '!=') { last TESTS unless $Var{$test} ne $value; }
@@ -355,7 +356,8 @@ sub logwall
 					}
 					else
 					{
-						selflog $sevnum{'err'}, "bareword in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, jump, log, rwlog";
+						selflog $sevnum{'err'}, "bareword '$test' in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, comm, jump, log, rwlog";
+						last TESTS;
 					}
 			    }
 			    else
@@ -370,7 +372,7 @@ sub logwall
 				}
 			}
 		}
-	
+		
 		if($pass)
 		{
 			for my $var (qw/facility severity datetime pid msg/)

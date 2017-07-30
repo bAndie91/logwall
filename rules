@@ -12,7 +12,7 @@
 ##     Log message's attributes:
 ##       facility**, severity**, level**, tag, sourcename, ident, pid*, msg
 ##     Logging process' attributes:
-##       realpid*, puid*, pgid*, powner, pgroup, exe
+##       realpid*, puid*, pgid*, powner, pgroup, exe, comm
 ##     Process' executable file's attributes:
 ##       uid*, gid*, owner, group
 ##
@@ -91,7 +91,7 @@
 ##     facility, severity, pid
 ##
 ## Variable substitution:
-##   Testing keywords are substituted with theirs value, eg:
+##   Testing keywords are substituted with their value, eg:
 ##   facility==user sourcename+="-{{powner}}"
 ##
 ## Regexp substitution:
