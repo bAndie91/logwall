@@ -96,15 +96,15 @@
 ##
 ## Regexp substitution:
 ##   Separate the pattern and the replacement with tilde `~' mark, eg:
-##   msg:~error~ERROR
+##     msg:~error~ERROR
 ##   Use embedded notation for case insensitivity, eg:
-##   msg:~(?i)error~ERROR
+##     msg:~(?i)error~ERROR
 ##   Use hex char notation to match tilde literally, eg:
-##   msg:~\x7E~tilde
-##   Substitution is global by default, be tricky if you have to, eg:
-##   msg:~(?i)error(.*)~ERROR$1
+##     msg:~\x7E~tilde
+##   Substitution is global by default, be tricky if you need, eg:
+##     msg:~(?i)error(.*)~ERROR$1
 ##   Regexp variables usable in replacement string are limited to:
-##   $1 .. $9, $+, $`, $& and $'
+##     $1 .. $9, $+, $`, $& and $'
 ##
 ## Internal logging for debugging
 ##   [log|rwlog]=SEVERITY,ATTRIBUTES

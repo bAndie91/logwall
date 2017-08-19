@@ -5,6 +5,7 @@ use Socket;
 use POSIX qw/:sys_wait_h strftime locale_h setsid/;
 use Getopt::Long;
 use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID=>4, STAT_GID=>5, STAT_DEVIDENT=>6, STAT_SIZE=>7, STAT_ATIME=>8, STAT_MTIME=>9, STAT_CTIME=>10, STAT_PREFBLKSZ=>11, STAT_BLOCKS=>12, };
+use IPC::Shareable;
 
 
 @facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
@@ -38,7 +39,7 @@ GetOptions(
     'P|pidfile=s'   => \$pid_file,
     'q|quiet'       => \$quiet,
 )
-or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-r <rules file>]
+or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-r <rules file>] [-P <pid file>]
 defaults: -l $sock_listen -c $sock_connect -r $rules_file -P $pid_file
 ");
 
@@ -69,7 +70,14 @@ sub selflog
 	# log ourself at syslog facility
 	my $str = mklogline($facnum{'syslog'}, $_[0], strftime("%b %e %H:%M:%S", localtime), "logwall[$$]:", $_[1]);
 	print STDERR $str if !$quiet;
-	print $backend $str;
+	my $printerr = print $backend $str;
+	
+	$Stats->{'messages'}->{'originated'}->{'count'}++;
+	$Stats->{'messages'}->{'originated'}->{'facility'}->{'syslog'}++;
+	$Stats->{'messages'}->{'originated'}->{'severity'}->{$sevnam[$_[0]]}++;
+	$Stats->{'messages'}->{'originated'}->{'size'}->{'total'} += length $str;
+	$Stats->{'messages'}->{'originated'}->{'size'}->{'message'} += length $_[1];
+	$Stats->{'messages'}->{'originated'}->{'error'}++ if $printerr == 0;
 }
 
 sub mklogline
@@ -113,6 +121,10 @@ sub logwall
 		$PeerVar{$varname} = shift;
 	}
 	my @args = @_;
+	
+	tie $Stats, 'IPC::Shareable', "logwall/stats", {mode=>0664, create=>1,};
+	$Stats->{'forks'}->{'count'}++;
+	
 	
 	if(defined $PeerVar{"puid"})
 	{
@@ -166,6 +178,8 @@ sub logwall
 		my $pass = 1;
 		my %rw;
 		my %Var = %PeerVar;
+		$Stats->{'messages'}->{'received'}->{'count'}++;
+		$Stats->{'messages'}->{'received'}->{'size'}->{'total'} += length;
 		
 		LOG_PACKET:
 		s/\x00$//;
@@ -182,9 +196,14 @@ sub logwall
 			$Var{"tag"} = $+{'tag'};
 			($Var{"sourcename"}) = ($Var{"tag"} =~ /^([a-z0-9_\.,\/><-]+)/i);
 			($Var{"pid"}) = ($Var{"tag"} =~ /\[(\d+)\]:?$/);
+			
+			$Stats->{'messages'}->{'received'}->{'facility'}->{$Var{'facility_name'}}++;
+			$Stats->{'messages'}->{'received'}->{'severity'}->{$Var{'severity_name'}}++;
+			$Stats->{'messages'}->{'received'}->{'size'}->{'message'} += length $Var{"msg"};
 		}
 		else
 		{
+			$Stats->{'messages'}->{'received'}->{'invalid'}++;
 			s/[\r\n]/sprintf "\\x%02X", ord($&)/eg;
 			selflog $sevnum{'error'}, "Invalid: $_\n";
 			next;
@@ -375,7 +394,7 @@ sub logwall
 		
 		if($pass)
 		{
-			for my $var (qw/facility severity datetime pid msg/)
+			for my $var (qw/facility severity facility_name severity_name datetime pid msg/)
 			{
 				$Var{$var} = $rw{$var} if defined $rw{$var};
 			}
@@ -399,7 +418,15 @@ sub logwall
 				}
 				$Var{'tag'} .= ':';
 			}
-			print $backend mklogline($Var{'facility'}, $Var{'severity'}, $Var{'datetime'}, $Var{'tag'}, $Var{'msg'});
+			my $raw = mklogline($Var{'facility'}, $Var{'severity'}, $Var{'datetime'}, $Var{'tag'}, $Var{'msg'});
+			my $printerr = print $backend $raw;
+			
+			$Stats->{'messages'}->{'forwarded'}->{'count'}++;
+			$Stats->{'messages'}->{'forwarded'}->{'facility'}->{$Var{'facility_name'}}++;
+			$Stats->{'messages'}->{'forwarded'}->{'severity'}->{$Var{'severity_name'}}++;
+			$Stats->{'messages'}->{'forwarded'}->{'size'}->{'total'} += length $raw;
+			$Stats->{'messages'}->{'forwarded'}->{'size'}->{'message'} += length $Var{'msg'};
+			$Stats->{'messages'}->{'forwarded'}->{'error'}++ if $printerr == 0;
 		}
 	}
 	
@@ -439,7 +466,6 @@ sub early_die
 
 
 
-
 $sock_listen_addr = sockaddr_un($sock_listen);
 $sock_connect_addr = sockaddr_un($sock_connect);
 
@@ -475,21 +501,21 @@ if($fork == 0)
 	close STDIN;
 	chdir "/";
 	setsid();
-
+	
 	open $fh, '>', $pid_file;
 	print $fh $$;
 	close $fh;
-
+	
 	$SIG{'TERM'} = $SIG{'QUIT'} = $SIG{'INT'} = \&libercid;
 	$SIG{'CHLD'} = \&bury;
 	$SIG{'HUP'} = \&suicid;
-
+	
     	ACCEPT:
 		1 while not accept($client, $frontend);
-
+		
 		##<< Race-Condition >>##
 		($realpid, $puid, $pgid, $exe, $args, $comm, @args) = peerdata($client);
-	
+		
 		$kid = fork;
 		if(not defined $kid)
 		{
@@ -506,6 +532,7 @@ if($fork == 0)
 		{
 			$kids{$kid} = 1;
 		}
+	
 	goto ACCEPT;
 	exit;
 }
