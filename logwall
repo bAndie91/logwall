@@ -286,12 +286,12 @@ sub logwall
 								}
 								elsif($attr =~ /^-(.+)/)
 								{
-									my $a = $1;
+									my $a = resolvealias($1);
 									@newattrs = grep { $_ ne $a; } @newattrs;
 								}
 								else
 								{
-									push @newattrs, $attr;
+									push @newattrs, resolvealias($attr);
 								}
 							}
 							@attrs = @newattrs;
@@ -309,9 +309,9 @@ sub logwall
 						}@attrs;
 					}
 					
-					elsif($test =~ /^exe|powner|pgroup|owner|group|tag|sourcename|msg|comm$/)
+					elsif($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm)$/)
 					{
-						if($op eq '==') { last TESTS unless $Var{$test} eq $value; }
+						if($op eq '==')    { last TESTS unless $Var{$test} eq $value; }
 						elsif($op eq '!=') { last TESTS unless $Var{$test} ne $value; }
 						elsif($op eq '=~') { last TESTS unless $Var{$test} =~ /$value/; }
 						elsif($op eq '=*') { last TESTS unless $Var{$test} =~ /$value/i; }
@@ -319,7 +319,7 @@ sub logwall
 						elsif($op eq '!*') { last TESTS unless $Var{$test} !~ /$value/i; }
 						elsif($op ~~ [':=', '^=', '+=', ':~'])
 						{
-							if($test =~ /^tag|sourcename|msg$/)
+							if($test =~ /^(tag|sourcename|msg)$/)
 							{
 								$value =~ s/\{\{(.+?)\}\}/$Var{resolvealias($1)}/eg;
 								$rw{$test} = $value if $op eq ':=';
@@ -343,16 +343,16 @@ sub logwall
 						}
 					}
 					
-					elsif($test =~ /^realpid|puid|pgid|uid|gid|facility|severity|pid$/)
+					elsif($test =~ /^(realpid|puid|pgid|uid|gid|facility|severity|pid)$/)
 					{
 						$value = int $value;
-						if($op =~ /^==|!=|>=|<=|>|<$/)
+						if($op =~ /^(==|!=|>=|<=|>|<)$/)
 						{
 							last TESTS unless eval qq{$Var{$test} $op $value};
 						}
 						elsif($op eq ':=')
 						{
-							if($test =~ /^facility|severity$/)
+							if($test =~ /^(facility|severity)$/)
 							{
 								$rw{$test} = $value;
 								$rw{$test.'_name'} = $Names{$test}->{$value};
@@ -539,6 +539,3 @@ if($fork == 0)
 
 print STDERR "logwall started, pid $fork\n" if !$quiet;
 
-#
-# see RFC 3164
-#
