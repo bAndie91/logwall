@@ -45,6 +45,25 @@ defaults: -l $sock_listen -c $sock_connect -r $rules_file -P $pid_file
 
 
 
+sub tiestats
+{
+	tie $Stats, 'IPC::Shareable', "logwall/stats", {mode=>0664, create=>1,};
+	$Stats->{'canary'}->{'canary'} = 1;
+}
+sub mkstats
+{
+	if(not defined tied($Stats))
+	{
+		tiestats;
+	}
+	if(not $Stats->{'canary'}->{'canary'})
+	{
+		# TODO, race condition
+		tied($Stats)->remove;
+		tiestats;
+	}
+}
+
 sub repl
 {
 	my $repl;
@@ -122,7 +141,7 @@ sub logwall
 	}
 	my @args = @_;
 	
-	tie $Stats, 'IPC::Shareable', "logwall/stats", {mode=>0664, create=>1,};
+	mkstats;
 	$Stats->{'forks'}->{'count'}++;
 	
 	
@@ -178,6 +197,7 @@ sub logwall
 		my $pass = 1;
 		my %rw;
 		my %Var = %PeerVar;
+		mkstats;
 		$Stats->{'messages'}->{'received'}->{'count'}++;
 		$Stats->{'messages'}->{'received'}->{'size'}->{'total'} += length;
 		
@@ -421,6 +441,7 @@ sub logwall
 			my $raw = mklogline($Var{'facility'}, $Var{'severity'}, $Var{'datetime'}, $Var{'tag'}, $Var{'msg'});
 			my $printerr = print $backend $raw;
 			
+			mkstats;
 			$Stats->{'messages'}->{'forwarded'}->{'count'}++;
 			$Stats->{'messages'}->{'forwarded'}->{'facility'}->{$Var{'facility_name'}}++;
 			$Stats->{'messages'}->{'forwarded'}->{'severity'}->{$Var{'severity_name'}}++;
