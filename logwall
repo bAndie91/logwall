@@ -30,7 +30,7 @@ $sock_listen = "/dev/log";
 $sock_connect = "/dev/logwall";
 $rules_file = "/etc/logwall/rules";
 $pid_file = "/var/run/logwall.pid";
-$stats_file = "/var/run/shm/logwall-stats.txt";
+$stats_file = "/var/run/shm/logwall-stats.json";
 $quiet = 0;
 
 Getopt::Long::Configure(qw/no_ignore_case/);
@@ -93,7 +93,11 @@ sub addstats
 	open my $fh, '+<', $stats_file;
 	flock $fh, LOCK_EX;
 	local $/ = undef;
-	my $stats = decode_json(<$fh> || '{}');
+	my $stats;
+	eval {
+		$stats = decode_json(<$fh> || '{}');
+		1;
+	} or $stats = {};
 	seek $fh, 0, 0;
 	merge_deep($stats, $_[0]);
 	print {$fh} encode_json($stats);
