@@ -5,7 +5,8 @@ use Socket;
 use POSIX qw/:sys_wait_h strftime locale_h setsid/;
 use Getopt::Long;
 use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID=>4, STAT_GID=>5, STAT_DEVIDENT=>6, STAT_SIZE=>7, STAT_ATIME=>8, STAT_MTIME=>9, STAT_CTIME=>10, STAT_PREFBLKSZ=>11, STAT_BLOCKS=>12, };
-use IPC::Shareable;
+use JSON;
+use Fcntl ':flock';
 
 
 @facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
@@ -29,6 +30,7 @@ $sock_listen = "/dev/log";
 $sock_connect = "/dev/logwall";
 $rules_file = "/etc/logwall/rules";
 $pid_file = "/var/run/logwall.pid";
+$stats_file = "/var/run/shm/logwall-stats.txt";
 $quiet = 0;
 
 Getopt::Long::Configure(qw/no_ignore_case/);
@@ -37,31 +39,66 @@ GetOptions(
     'c|connect=s'   => \$sock_connect,
     'r|rules=s'     => \$rules_file,
     'P|pidfile=s'   => \$pid_file,
+    'S|statsfile=s' => \$stats_file,
     'q|quiet'       => \$quiet,
 )
-or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-r <rules file>] [-P <pid file>]
-defaults: -l $sock_listen -c $sock_connect -r $rules_file -P $pid_file
+or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-r <rules file>] [-P <pid file>] [-S <stats file>]
+defaults: -l $sock_listen -c $sock_connect -r $rules_file -P $pid_file -S $stats_file
 ");
 
 
 
-sub tiestats
+sub merge_deep
 {
-	tie $Stats, 'IPC::Shareable', "logwall/stats", {mode=>0664, create=>1,};
-	$Stats->{'canary'}->{'canary'} = 1;
+	my $ref2 = $_[1];
+	
+	if(ref $ref2 eq '')
+	{
+		# Sum up old and new values
+		$_[0] += $ref2;
+	}
+	elsif(ref $ref2 eq 'HASH')
+	{
+		if(ref $_[0] ne 'HASH')
+		{
+			$_[0] = {};
+		}
+		for my $key (keys %$ref2)
+		{
+			merge_deep($_[0]->{$key}, $ref2->{$key});
+		}
+	}
+	elsif(ref $ref2 eq 'ARRAY')
+	{
+		if(ref $_[0] ne 'ARRAY')
+		{
+			$_[0] = [];
+		}
+		# TODO
+		# should the target array be appended/patched/overwritten?
+		# now it's patched
+		for my $idx (0..$#$ref2)
+		{
+			merge_deep($_[0]->[$idx], $ref2->[$idx]);
+		}
+	}
+	else
+	{
+		merge_deep($_[0], $$ref2);
+	}
 }
-sub mkstats
+
+sub addstats
 {
-	if(not defined tied($Stats))
-	{
-		tiestats;
-	}
-	if(not $Stats->{'canary'}->{'canary'})
-	{
-		# TODO, race condition
-		tied($Stats)->remove;
-		tiestats;
-	}
+	open my $fh, '+<', $stats_file;
+	flock $fh, LOCK_EX;
+	local $/ = undef;
+	my $stats = decode_json(<$fh> || '{}');
+	seek $fh, 0, 0;
+	merge_deep($stats, $_[0]);
+	print {$fh} encode_json($stats);
+	truncate $fh, tell $fh;
+	close $fh;
 }
 
 sub repl
@@ -91,12 +128,20 @@ sub selflog
 	print STDERR $str if !$quiet;
 	my $printerr = print $backend $str;
 	
-	$Stats->{'messages'}->{'originated'}->{'count'}++;
-	$Stats->{'messages'}->{'originated'}->{'facility'}->{'syslog'}++;
-	$Stats->{'messages'}->{'originated'}->{'severity'}->{$sevnam[$_[0]]}++;
-	$Stats->{'messages'}->{'originated'}->{'size'}->{'total'} += length $str;
-	$Stats->{'messages'}->{'originated'}->{'size'}->{'message'} += length $_[1];
-	$Stats->{'messages'}->{'originated'}->{'error'}++ if $printerr == 0;
+	addstats({
+		'messages' => {
+			'originated' => {
+				'count' => 1,
+				'facility' => {'syslog' => 1,},
+				'severity' => {$sevnam[$_[0]] => 1,},
+				'size' => {
+					'total' => length $str,
+					'message' => length $_[1],
+				},
+				'error' => ($printerr == 0 ? 1 : 0),
+			},
+		},
+	});
 }
 
 sub mklogline
@@ -141,8 +186,7 @@ sub logwall
 	}
 	my @args = @_;
 	
-	mkstats;
-	$Stats->{'forks'}->{'count'}++;
+	addstats({'forks' => {'count' => 1,},});
 	
 	
 	if(defined $PeerVar{"puid"})
@@ -197,9 +241,14 @@ sub logwall
 		my $pass = 1;
 		my %rw;
 		my %Var = %PeerVar;
-		mkstats;
-		$Stats->{'messages'}->{'received'}->{'count'}++;
-		$Stats->{'messages'}->{'received'}->{'size'}->{'total'} += length;
+		addstats({
+			'messages' => {
+				'received' => {
+					'count' => 1,
+					'size' => {'total' => length,},
+				},
+			},
+		});
 		
 		LOG_PACKET:
 		s/\x00$//;
@@ -217,13 +266,24 @@ sub logwall
 			($Var{"sourcename"}) = ($Var{"tag"} =~ /^([a-z0-9_\.,\/><-]+)/i);
 			($Var{"pid"}) = ($Var{"tag"} =~ /\[(\d+)\]:?$/);
 			
-			$Stats->{'messages'}->{'received'}->{'facility'}->{$Var{'facility_name'}}++;
-			$Stats->{'messages'}->{'received'}->{'severity'}->{$Var{'severity_name'}}++;
-			$Stats->{'messages'}->{'received'}->{'size'}->{'message'} += length $Var{"msg"};
+			addstats({
+				'messages' => {
+					'received' => {
+						'facility' => {$Var{'facility_name'} => 1,},
+						'severity' => {$Var{'severity_name'} => 1,},
+						'size' => {'message' => length $Var{'msg'},},
+					},
+				},
+			});
 		}
 		else
 		{
-			$Stats->{'messages'}->{'received'}->{'invalid'}++;
+			addstats({
+				'messages' => {
+					'received' => {'invalid' => 1,},
+				},
+			});
+			
 			s/[\r\n]/sprintf "\\x%02X", ord($&)/eg;
 			selflog $sevnum{'error'}, "Invalid: $_\n";
 			next;
@@ -441,13 +501,20 @@ sub logwall
 			my $raw = mklogline($Var{'facility'}, $Var{'severity'}, $Var{'datetime'}, $Var{'tag'}, $Var{'msg'});
 			my $printerr = print $backend $raw;
 			
-			mkstats;
-			$Stats->{'messages'}->{'forwarded'}->{'count'}++;
-			$Stats->{'messages'}->{'forwarded'}->{'facility'}->{$Var{'facility_name'}}++;
-			$Stats->{'messages'}->{'forwarded'}->{'severity'}->{$Var{'severity_name'}}++;
-			$Stats->{'messages'}->{'forwarded'}->{'size'}->{'total'} += length $raw;
-			$Stats->{'messages'}->{'forwarded'}->{'size'}->{'message'} += length $Var{'msg'};
-			$Stats->{'messages'}->{'forwarded'}->{'error'}++ if $printerr == 0;
+			addstats({
+				'messages' => {
+					'forwarded' => {
+						'count' => 1,
+						'facility' => {$Var{'facility_name'} => 1,},
+						'severity' => {$Var{'severity_name'} => 1,},
+						'size' => {
+							'total' => length $raw,
+							'message' => length $Var{'msg'},
+						},
+						'error' => ($printerr == 0 ? 1 : 0),
+					},
+				},
+			});
 		}
 	}
 	
@@ -486,6 +553,12 @@ sub early_die
 }
 
 
+
+$str = "Stats: $stats_file: ";
+print STDERR $str if !$quiet;
+open($stats_file, '>>', $stats_file) or early_die $str;
+print STDERR "Ok\n" if !$quiet;
+close $stats_file;
 
 $sock_listen_addr = sockaddr_un($sock_listen);
 $sock_connect_addr = sockaddr_un($sock_connect);
