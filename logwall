@@ -575,8 +575,8 @@ sub splitFifoSpec
 {
 	my ($nick, $owner, $group, $mode, $file) = split /:/, $_[0], 5;
 	if($nick eq '') { ($nick) = $file =~ /([^\/]+)$/; }
-	if($owner eq '') { $owner = 0; }
-	if($group eq '') { $group = 0; }
+	if($owner eq '') { $owner = $>; }
+	if($group eq '') { ($group) = split ' ', $); }
 	if($mode eq '') { $mode = 0666; }
 	if($owner =~ /^\d+$/) { $uid = $owner; }
 	else { (undef, undef, $uid) = getpwnam $owner; }
@@ -609,10 +609,10 @@ sub suicid
 }
 sub early_die
 {
-	print STDERR $_[0] if $quiet;
+	print STDERR $_[0] if $quiet or $! == 0;
 	print STDERR "$!\n";
-	exit $_[1] if defined $_[1];
-	exit int $!;
+	exit int $! if $! > 0;
+	exit $_[1];
 }
 
 
@@ -620,7 +620,7 @@ sub early_die
 $str = "Stats: $stats_file: ";
 print STDERR $str if !$quiet;
 open($stats_file, '>>', $stats_file) or early_die $str;
-print STDERR "Ok\n" if !$quiet;
+print STDERR "Writeable\n" if !$quiet;
 close $stats_file;
 
 $sock_listen_addr = sockaddr_un($sock_listen);
@@ -648,9 +648,10 @@ for my $fifospec (@fifo_listeners)
 	
 	$str = "Fifo listener: $file: ";
 	print STDERR $str if !$quiet;
+	unlink $file if -p $file;
 	mkfifo $file, $mode or early_die $str;
 	chown $uid, $gid, $file or early_die $str;
-	print STDERR "Created" if !$quiet;
+	print STDERR "Created\n" if !$quiet;
 }
 
 $str = "Backend: $sock_connect: ";
@@ -665,7 +666,7 @@ print STDERR $str if !$quiet;
 #socket($frontend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
 socket($frontend, AF_UNIX, SOCK_STREAM, 0) or early_die $str;
 setsockopt($frontend, SOL_SOCKET, SO_PASSCRED, 1);
-unlink($sock_listen);
+unlink($sock_listen) if -S $sock_listen;
 bind($frontend, $sock_listen_addr) or early_die $str;
 chmod(0666, $sock_listen) or warn ($quiet?$str:'')."$!\n";
 chmod(0660, $sock_connect) or warn ($quiet?$str:'')."$!\n";
