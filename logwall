@@ -302,9 +302,10 @@ sub logwall
 			# Treat this line a raw log message written to a Fifo.
 			$Var{"msg"} = $_;
 			$Var{"facility"} = $facnum{'user'};
-			$Var{"severity"} = $sevnum{'err'};
+			$Var{"severity"} = $sevnum{'notice'};
 			$Var{"datetime"} = strftime("%b %e %H:%M:%S", localtime);
-			$Var{"tag"} = $Var{"sourcename"} = $Var{"pid"} = '';
+			$Var{"tag"} = $Var{"sourcename"} = "fifo-".$PeerVar{"fifonick"};
+			$Var{"pid"} = '';
 			
 			addstats({
 				'messages' => {
