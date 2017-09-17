@@ -299,7 +299,7 @@ sub logwall
 		}
 		elsif(defined $PeerVar{"fifonick"})
 		{
-			# Treat this line a raw log message written to a Fifo.
+			# Treat this line is a raw log message written to a Fifo.
 			$Var{"msg"} = $_;
 			$Var{"facility"} = $facnum{'user'};
 			$Var{"severity"} = $sevnum{'notice'};
@@ -568,7 +568,6 @@ sub logwall
 	}
 	
 	shutdown $backend, 2;
-	close $client;
 	close $rules;
 }
 
@@ -705,9 +704,12 @@ if($fork == 0)
 			undef %kids;
 			undef $pid_file;
 			my ($nick, undef, undef, undef, $file) = splitFifoSpec($fifospec);
-			open my $client, '<', $file;
-			logwall($client, $nick);
-			close $client;
+			while(1)
+			{
+				open my $client, '<', $file;
+				logwall($client, $nick);
+				close $client;
+			}
 			exit;
 		}
 		else
@@ -735,6 +737,7 @@ if($fork == 0)
 			undef %kids;
 			undef $pid_file;
 			logwall($client, $realpid, $puid, $pgid, $exe, $args, $comm, @args);
+			close $client;
 			exit;
 		}
 		else
