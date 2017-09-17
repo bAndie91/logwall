@@ -577,7 +577,7 @@ sub splitFifoSpec
 	if($nick eq '') { ($nick) = $file =~ /([^\/]+)$/; }
 	if($owner eq '') { $owner = $>; }
 	if($group eq '') { ($group) = split ' ', $); }
-	if($mode eq '') { $mode = 0666; }
+	if($mode eq '') { $mode = 0666; } else { $mode = oct $mode; }
 	if($owner =~ /^\d+$/) { $uid = $owner; }
 	else { (undef, undef, $uid) = getpwnam $owner; }
 	if($group =~ /^\d+$/) { $gid = $group; }
