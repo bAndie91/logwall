@@ -40,6 +40,18 @@ GetOptions(
     'S|statsfile=s' => \$stats_file,
     'f|fifo=s@'     => \@fifo_listeners,
     'q|quiet'       => \$quiet,
+    'help'          => sub {
+    	print "Options:
+ --listen, -l      Frontend socket to listen to syslog connections on
+ --connect, -c     Backend socket to connect to real syslog daemon
+ --rules, -r       File to read rules from
+ --pidfile, -P     File to write PID into
+ --statsfile, -S   File to write and update statistics in JSON format into
+ --fifo, -f        Fifo specifications to listen to raw log messages on
+ --quiet, -q       Output less messages at start
+";
+    	exit;
+    },
 )
 or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]
 defaults: -l $sock_listen -c $sock_connect ".(join' ',map{"-f $_"}@fifo_listeners)." -r $rules_file -P $pid_file -S $stats_file
