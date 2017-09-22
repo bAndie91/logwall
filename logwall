@@ -721,12 +721,13 @@ if($fork == 0)
 			undef %kids;
 			undef $pid_file;
 			my ($nick, undef, undef, undef, $file) = splitFifoSpec($fifospec);
-			$0 = "logwall: $nick";
 			while(1)
 			{
+				$0 = "logwall: $nick (closed)";
 				#my $openmode = '+<';  # non blocking, continue execution
 				my $openmode = '<';  # blocking until someone write onto the fifo
 				open my $client, $openmode, $file;
+				$0 = "logwall: $nick (open)";
 				logwall($client, $nick);
 				close $client;
 			}
