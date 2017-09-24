@@ -269,7 +269,7 @@ sub process_rules
 				$value = $1 if $value =~ /^"([^""]*)"$/;
 				$test = resolvealias(lc $test);
 				
-				# convert string-represented facility/severity to facility/severity number
+				# Convert string-represented facility/severity to facility/severity number
 				if($test ~~ ['facility', 'severity'] and $value !~ /^\d+$/)
 				{
 					if(not exists $Numbs{$test}->{$value})
@@ -280,15 +280,19 @@ sub process_rules
 					$value = $Numbs{$test}->{$value};
 				}
 				
+				
+				# Evaluate test expression
+				my $evaled_testexpr = 0;
+				
 				if($test ~~ ['then', 'jump', 'action'])
 				{
 					$value = lc $value;
 					if($value eq 'drop') { $pass = 0; last RULES; }
 					elsif($value eq 'accept') { $pass = 1; last RULES; }
-					else { selflog $backend, $sevnum{'err'}, "keyword '$test' takes value: drop | accept"; }
+					else { selflog $backend, $sevnum{'err'}, "keyword '$test' takes 'drop' or 'accept' on line $nl"; }
 				}
 				
-				if($test ~~ ['log', 'rwlog'])
+				if($test ~~ ['log', 'rwlog'] and !$evaled_testexpr)
 				{
 					my @all = qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid fifonick tee/;
 					my ($wlevel, @attrs) = split ',', $value;
@@ -349,10 +353,13 @@ sub process_rules
 						}
 						sprintf "%s=%s", $_, $str;
 					}@attrs;
+					
+					$evaled_testexpr = 1;
 				}
 				
-				if($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm|fifonick|tee)$/)
+				if($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm|fifonick|tee)$/ and !$evaled_testexpr)
 				{
+					$evaled_testexpr = 1;
 					if($op eq '==')    { last TESTS unless $Var{$test} eq $value; }
 					elsif($op eq '!=') { last TESTS unless $Var{$test} ne $value; }
 					elsif($op eq '=~') { last TESTS unless $Var{$test} =~ /$value/; }
@@ -364,6 +371,7 @@ sub process_rules
 						if($test =~ /^(tag|sourcename|msg)$/)
 						{
 							$value =~ s/\{\{(.+?)\}\}/$Var{resolvealias($1)}/eg;
+							
 							$rw{$test} = $value if $op eq ':=';
 							$rw{$test} = $value.$Var{$test} if $op eq '^=';
 							$rw{$test} = $Var{$test}.$value if $op eq '+=';
@@ -376,14 +384,14 @@ sub process_rules
 						else
 						{
 							selflog $backend, $sevnum{'warn'}, "attribute '$test' is not rewritable on line $nl";
+							$evaled_testexpr = 0;
 						}
 					}
 					elsif($op eq '=' and $test eq 'tee')
 					{
 						if($value ~~ @TeeStack)
 						{
-							# Prevent Infinite Cycle
-							0;
+							# Prevent Fork Bomb, ignore this tee.
 						}
 						else
 						{
@@ -416,11 +424,13 @@ sub process_rules
 							selflog $backend, $sevnum{'err'}, "keyword '$test' takes string comparasion or rewrite operator, but '$op' was found on line $nl";
 							last TESTS;
 						}
+						$evaled_testexpr = 0;
 					}
 				}
 				
-				if($test =~ /^(realpid|puid|pgid|uid|gid|facility|severity|pid|tee)$/)
+				if($test =~ /^(realpid|puid|pgid|uid|gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
 				{
+					$evaled_testexpr = 1;
 					$value = int $value;
 					if($op =~ /^(==|!=|>=|<=|>|<)$/)
 					{
@@ -441,6 +451,7 @@ sub process_rules
 						else
 						{
 							selflog $backend, $sevnum{'warn'}, "attribute '$test' is not rewritable on line $nl";
+							$evaled_testexpr = 0;
 						}
 					}
 					else
@@ -453,15 +464,18 @@ sub process_rules
 						{
 							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric relation or ':=' operator, but '$op' was found on line $nl";
 						}
+						$evaled_testexpr = 0;
 						last TESTS;
 					}
 				}
-				else
+				
+				if(!$evaled_testexpr)
 				{
 					selflog $backend, $sevnum{'err'}, "bareword '$test' in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, comm, fifonick, action, log, rwlog, tee";
 					last TESTS;
 				}
 		    }
+		    
 		    else
 		    {
 				s/\s*$//;
