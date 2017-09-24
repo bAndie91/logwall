@@ -16,17 +16,18 @@
 ##     Process' executable file's attributes:
 ##       uid*, gid*, owner, group
 ##     Other attributes:
-##       fifonick
+##       fifonick, tee***
 ##
-##     *=Takes numeric value
-##     **=Takes numeric value or facility/serverity name
+##     *=Takes numeric right value
+##     **=Takes numeric right value or facility/serverity name
+##     ***=Takes either numeric or string right value
 ##
 ##     Aliases:
 ##       level = severity
 ##       ident = sourcename
 ##
 ##   Action keywords:
-##     jump, log, rwlog
+##     action, log, rwlog, tee
 ##
 ## Explanation:
 ##
@@ -41,6 +42,7 @@
 ##   uid, gid - executable file's owner and group owner (see exe)
 ##   owner, group - username and group name corresponding to uid and gid
 ##   fifonick - empty for messages received on socket; nickname for messages received on Fifo - see Fifo file specification
+##   tee - clones the current message when using as action keyword ('=' operator) and gives a "tee ID" (right value) to the resulting message, otherwise (as a testing keyword) checks tee ID
 ##
 ## Operators:
 ##   Numeric and string operators:
@@ -62,7 +64,7 @@
 ##     +=  append
 ##     :~  regexp substitution
 ##   Other:
-##     =   use this behind action keywords
+##     =   use this for action keywords
 ##
 ## Facilities:
 ##     0	kern
