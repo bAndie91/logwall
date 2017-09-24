@@ -15,6 +15,8 @@
 ##       realpid*, puid*, pgid*, powner, pgroup, exe, comm, args
 ##     Process' executable file's attributes:
 ##       uid*, gid*, owner, group
+##     Other attributes:
+##       fifonick
 ##
 ##     *=Takes numeric value
 ##     **=Takes numeric value or facility/serverity name
@@ -32,12 +34,13 @@
 ##   tag - basically the first word of message payload, the sourcename usually and pid optionally
 ##   sourcename, pid - text and number extracted from tag, can be forged by user
 ##   msg - valuable message
-##   realpid, puid, pgid - authentic attributes of the log-sender process got from socket peer credentials data
+##   realpid, puid, pgid - authentic attributes of the log-sender process got from socket peer credentials data from the kernel; otherwise 0, -1, -1 respectively
 ##   powner, pgroup - username and group name corresponding to puid and pgid
 ##   exe - executable file path of running process (see /proc/PID/exe), it's the interpreter for scripts
 ##   comm, args - command name and command line arguments of running process (see /proc/PID/comm and /proc/PID/cmdline), can be forged by user
 ##   uid, gid - executable file's owner and group owner (see exe)
 ##   owner, group - username and group name corresponding to uid and gid
+##   fifonick - empty for messages received on socket; nickname for messages received on Fifo - see Fifo file specification
 ##
 ## Operators:
 ##   Numeric and string operators:
@@ -138,6 +141,22 @@
 ##   severity<=crit puid>=1000 log=info jump=drop
 ##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
 ##
+## Fifo name specification
+##
+##   Command line option syntax
+##     --fifo [NICKNAME]:[OWNER]:[GROUP]:[MODE]:<PATH>
+##   
+##   NICKNAME
+##     Nick name for this Fifo. Must start with alpha numeric char. Empty string evaluated to basename of PATH.
+##   OWNER
+##     User name or UID of fifo file to be created, default is current uid
+##   GROUP
+##     Group name or GID of fifo file to be created, default is current gid
+##   MODE
+##     Fifo file's permissions in octal base, default is 0666
+##   PATH
+##     Path of fifo file to be created
+##
 
 
 ### Rewrites ###
@@ -148,6 +167,9 @@ sourcename==/etc/mysql/debian-start sourcename:=mysqld-debian
 sourcename==/etc/init.d/mysql sourcename:=mysqld-debian
 sourcename==apcupsd msg=~"Power failure" severity:=crit
 
+# enforce "fifo-" prefox for messages arrived on fifo
+fifonick!="" tag:=fifo-{{fifonick}}
+
 # log all logs
 #log=debug rwlog=debug
 
@@ -155,14 +177,17 @@ sourcename==apcupsd msg=~"Power failure" severity:=crit
 ### Filters ###
 
 # most system processes
-puid<1000 jump=accept
+puid<1000 puid!=-1 jump=accept
 
 # trusted programms
 exe==/sbin/unix_chkpwd jump=accept
 exe==/usr/bin/sudo jump=accept
 exe==/bin/su jump=accept
 
-# we dont know the logger's credentials
+# trusted fifo
+fifonick==supervisor jump=accept
+
+# disallow high level messages from who we don't know
 exe=="" severity<error log=info jump=drop
 powner=="" severity<error log=info jump=drop
 
