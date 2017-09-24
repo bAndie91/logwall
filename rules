@@ -31,18 +31,46 @@
 ##
 ## Explanation:
 ##
-##   facility, severity - standard RFC 3164 (4.1.1) facilities and severities, see below
-##   tag - basically the first word of message payload, the sourcename usually and pid optionally
-##   sourcename, pid - text and number extracted from tag, can be forged by user
-##   msg - valuable message
-##   realpid, puid, pgid - authentic attributes of the log-sender process got from socket peer credentials data from the kernel; otherwise 0, -1, -1 respectively
-##   powner, pgroup - username and group name corresponding to puid and pgid
-##   exe - executable file path of running process (see /proc/PID/exe), it's the interpreter for scripts
-##   comm, args - command name and command line arguments of running process (see /proc/PID/comm and /proc/PID/cmdline), can be forged by user
-##   uid, gid - executable file's owner and group owner (see exe)
-##   owner, group - username and group name corresponding to uid and gid
-##   fifonick - empty for messages received on socket; nickname for messages received on Fifo - see Fifo file specification
-##   tee - clones the current message when using as action keyword ('=' operator) and gives a "tee ID" (right value) to the resulting message, otherwise (as a testing keyword) checks tee ID
+##   facility
+##   severity
+##     standard RFC 3164 (4.1.1) facilities and severities, see below
+##   tag
+##     basically the first word of message payload.
+##     usually the sourcename plus the pid optionally.
+##   sourcename
+##   pid
+##     text and number extracted from tag.
+##     can be forged by user.
+##   msg
+##     valuable message
+##   realpid
+##   puid
+##   pgid
+##     authentic attributes of the log sender process got from socket's peer credentials from the kernel.
+##     otherwise 0, -1, -1 respectively if peer credentials are not gotten.
+##   powner
+##   pgroup
+##     username and group name corresponding to puid and pgid.
+##   exe
+##     executable file path of running process (see /proc/PID/exe).
+##     it's an interpreter for scripts.
+##   comm
+##   args
+##     command name and command line arguments of running process (see /proc/PID/comm and /proc/PID/cmdline).
+##     can be forged by user
+##   uid
+##   gid
+##     executable file's owner and group owner (see exe)
+##   owner
+##   group
+##     username and group name corresponding to uid and gid
+##   fifonick
+##     empty for messages received on socket.
+##     nickname for messages received on Fifo (see Fifo file specification)
+##   tee
+##     as a testing keyword it checks the current message's "tee ID" which comes from an earlier tee action.
+##     as an action keyword, it clones the current message and gives a "tee ID" (right value) to the resulting message.
+##     it never clones a message which has been already cloned with the same "tee ID".
 ##
 ## Operators:
 ##   Numeric and string operators:

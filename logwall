@@ -255,7 +255,7 @@ sub process_rules
 	local $/ = "\n";
 	
 	RULES:
-	while(<$rules>)
+	while(my $_ = <$rules>)
 	{
 		$nl++;
 		
@@ -416,7 +416,7 @@ sub process_rules
 								},
 							});
 							my $rules_pos = tell $rules;
-							process_rules($rules, $backend, \%TeeVar, \@TeeStack);
+							process_rules($backend, $rules, \%TeeVar, \@TeeStack);
 							seek $rules, $rules_pos, 0;
 						}
 					}
