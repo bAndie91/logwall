@@ -343,9 +343,12 @@ sub process_rules
 						@attrs = @newattrs;
 					}
 					
+					if($test eq 'log')      { $attributesRef = \%Var; }
+					elsif($test eq 'rwlog') { $attributesRef = \%rw; }
+					
 					selflog $backend, $wlevel, join ' ', map
 					{
-						my $str = $Var{$_};
+						my $str = $attributesRef->{$_};
 						if($str =~ /[ \x22\x5C]/)
 						{
 							$str =~ s/[\x22\x5C]/\\$&/g;
