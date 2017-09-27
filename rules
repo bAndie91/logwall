@@ -166,9 +166,9 @@
 ##     sourcename==test  msg^="test: "  rwlog=debug,ALLRW,powner,pgroup,exe
 ##
 ## Examples:
-##   powner!=root jump=drop
-##   severity>crit jump=accept
-##   severity<=crit puid>=1000 log=info jump=drop
+##   powner!=root action=drop
+##   severity>crit action=accept
+##   severity<=crit puid>=1000 log=info action=drop
 ##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
 ##
 ## Fifo name specification
@@ -207,24 +207,24 @@ fifonick!="" tag:=fifo-{{fifonick}}
 ### Filters ###
 
 # most system processes
-puid<1000 puid!=-1 jump=accept
+puid<1000 puid!=-1 action=accept
 
 # trusted programms
-exe==/sbin/unix_chkpwd jump=accept
-exe==/usr/bin/sudo jump=accept
-exe==/bin/su jump=accept
+exe==/sbin/unix_chkpwd action=accept
+exe==/usr/bin/sudo action=accept
+exe==/bin/su action=accept
 
 # trusted fifo
-fifonick==supervisor jump=accept
+fifonick==supervisor action=accept
 
 # disallow high level messages from who we don't know
-exe=="" severity<error log=info jump=drop
-powner=="" severity<error log=info jump=drop
+exe=="" severity<error log=info action=drop
+powner=="" severity<error log=info action=drop
 
 # allow only these for everyone else
-facility==user jump=accept
-facility>=local1 facility!=local3 facility<=local7 jump=accept
+facility==user action=accept
+facility>=local1 facility!=local3 facility<=local7 action=accept
 
 # drop policy
-log=notice,ALL,msg jump=drop
+log=notice,ALL,msg action=drop
 
