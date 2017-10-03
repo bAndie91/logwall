@@ -177,7 +177,7 @@ sub mklogline
 sub peerdata
 {
 	my $exe = "";
-	my $args = "";
+	my $argstr = "";
 	my $comm = "";
 	my @args;
 	my ($realpid, $puid, $pgid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
@@ -187,12 +187,12 @@ sub peerdata
 		$exe = readlink "/proc/$realpid/exe";
 		
 		open my $fh, '<', "/proc/$realpid/cmdline";
-		$args .= $_ while <$fh>;
+		$argstr .= $_ while <$fh>;
 		close $fh;
-		$args =~ s/\x00$//;
-		@args = split /\x00/, $args;
-		$args =~ s/\x00/ /g;
-		$args =~ s/[^\x20-\x7E]/sprintf '\x%02X', ord$&/eg;
+		$argstr =~ s/\x00$//;
+		@args = split /\x00/, $argstr;
+		$argstr =~ s/\x00/ /g;
+		$argstr =~ s/[^\x20-\x7E]/sprintf '\x%02X', ord$&/eg;
 		
 		open my $fh, '<', "/proc/$realpid/comm";
 		$comm .= $_ while <$fh>;
@@ -200,7 +200,7 @@ sub peerdata
 		close $fh;
 	}
 	
-	return ($realpid, $puid, $pgid, $exe, $args, $comm, @args);
+	return ($realpid, $puid, $pgid, $exe, $argstr, $comm, @args);
 }
 
 sub apply_rewrites
@@ -360,7 +360,7 @@ sub process_rules
 					$evaled_testexpr = 1;
 				}
 				
-				if($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm|fifonick|tee)$/ and !$evaled_testexpr)
+				if($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
 				{
 					$evaled_testexpr = 1;
 					if($op eq '==')    { last TESTS unless $Var{$test} eq $value; }
@@ -839,7 +839,7 @@ if($fork == 0)
 		1 while not accept($client, $frontend);
 		
 		##<< Race-Condition >>##
-		($realpid, $puid, $pgid, $exe, $args, $comm, @args) = peerdata($client);
+		($realpid, $puid, $pgid, $exe, $argstr, $comm, @args) = peerdata($client);
 		
 		$kid = fork;
 		if(not defined $kid)
@@ -850,7 +850,7 @@ if($fork == 0)
 		{
 			undef %kids;
 			undef $pid_file;
-			logwall($client, $realpid, $puid, $pgid, $exe, $args, $comm, @args);
+			logwall($client, $realpid, $puid, $pgid, $exe, $argstr, $comm, @args);
 			close $client;
 			exit;
 		}
