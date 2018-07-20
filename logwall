@@ -474,7 +474,7 @@ sub process_rules
 				
 				if(!$evaled_testexpr)
 				{
-					selflog $backend, $sevnum{'err'}, "bareword '$test' in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, comm, fifonick, action, log, rwlog, tee";
+					selflog $backend, $sevnum{'err'}, "bareword '$test' in $rules_file on line $nl; valid keywords: realpid, puid, pgid, powner, pgroup, exe, uid, gid, owner, group, facility, severity, tag, sourcename, pid, msg, comm, args, fifonick, action, log, rwlog, tee";
 					last TESTS;
 				}
 		    }
