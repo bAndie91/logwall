@@ -20,7 +20,7 @@ undef $i;
 $sevnum{'panic'} = $sevnum{'emerg'};
 $sevnum{'err'} = $sevnum{'error'};
 $sevnum{'warn'} = $sevnum{'warning'};
-%Names = ('severity' => \%sevnam, 'facility' => \%facnam, );
+%Names = ('severity' => \@sevnam, 'facility' => \@facnam, );
 %Numbs = ('severity' => \%sevnum, 'facility' => \%facnum, );
 
 
@@ -298,6 +298,7 @@ sub process_rules
 				if($test ~~ ['log', 'rwlog'] and !$evaled_testexpr)
 				{
 					my @all = qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid fifonick tee/;
+					my @allrw = grep {!/^(severity|facility)$/} keys %rw;
 					my ($wlevel, @attrs) = split ',', $value;
 					if($wlevel !~ /^\d+$/)
 					{
@@ -317,7 +318,7 @@ sub process_rules
 						}
 						elsif($test eq 'rwlog')
 						{
-							@attrs = keys %rw;
+							@attrs = @allrw;
 						}
 					}
 					else
@@ -331,7 +332,7 @@ sub process_rules
 							}
 							elsif($attr eq 'ALLRW')
 							{
-								push @newattrs, keys %rw;
+								push @newattrs, @allrw;
 							}
 							elsif($attr =~ /^-(.+)/)
 							{
@@ -448,7 +449,7 @@ sub process_rules
 						if($test ~~ ['facility', 'severity'])
 						{
 							$rw{$test} = $value;
-							$rw{$test.'_name'} = $Names{$test}->{$value};
+							$rw{$test.'_name'} = $Names{$test}->[$value];
 						}
 						elsif($test eq 'pid')
 						{
@@ -513,7 +514,7 @@ sub process_rules
 	
 	if($pass)
 	{
-		apply_rewrites(\%Var, \%rw);
+		apply_rewrites($VarRef, \%rw);
 	}
 	
 	return $pass;
