@@ -7,6 +7,7 @@ use Getopt::Long;
 use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID=>4, STAT_GID=>5, STAT_DEVIDENT=>6, STAT_SIZE=>7, STAT_ATIME=>8, STAT_MTIME=>9, STAT_CTIME=>10, STAT_PREFBLKSZ=>11, STAT_BLOCKS=>12, };
 use JSON;
 use Fcntl ':flock';
+use Cwd;
 
 
 @facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
@@ -44,21 +45,19 @@ GetOptions(
     'q|quiet'       => \$quiet,
     'help'          => sub {
     	print "Options:
- --listen, -l      Frontend socket to listen to syslog connections on
- --connect, -c     Backend socket to connect to real syslog daemon
- --rules, -r       File to read event-level rules from
- --stream-rules    File to read stream-level rules from
- --pidfile, -P     File to write PID into
- --statsfile, -S   File to write and update statistics in JSON format into
+ --listen, -l      Frontend socket to listen to syslog connections on ($sock_listen)
+ --connect, -c     Backend socket to connect to real syslog daemon ($sock_connect)
+ --rules, -r       File to read event-level rules from ($rules_file)
+ --stream-rules    File to read stream-level rules from ($stream_rules_file)
+ --pidfile, -P     File to write PID into ($pid_file)
+ --statsfile, -S   File to write and update statistics in JSON format into ($stats_file)
  --fifo, -f        Fifo specifications to listen to raw log messages on
  --quiet, -q       Output less messages at start
 ";
     	exit;
     },
 )
-or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]
-defaults: -l $sock_listen -c $sock_connect ".(join' ',map{"-f $_"}@fifo_listeners)." -r $rules_file -P $pid_file -S $stats_file
-");
+or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]\n");
 
 
 
@@ -782,7 +781,20 @@ sub early_die
 	exit int $! if $! > 0;
 	exit $_[1];
 }
+sub absolute_path
+{
+	return $_[0] if $_[0] =~ /^\//;
+	return Cwd::getcwd . '/' . $_[0];
+}
 
+
+
+$sock_listen = absolute_path $sock_listen;
+$sock_connect = absolute_path $sock_connect;
+$rules_file = absolute_path $rules_file;
+$stream_rules_file = absolute_path $stream_rules_file;
+$pid_file = absolute_path $pid_file;
+$stats_file = absolute_path $stats_file;
 
 
 $str = "Stats: $stats_file: ";
