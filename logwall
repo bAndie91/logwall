@@ -125,7 +125,7 @@ sub addstats
 	close $fh;
 }
 
-sub repl
+sub replace_regexp
 {
 	my $repl;
 	my %D;
@@ -133,7 +133,26 @@ sub repl
 	($repl, $D{'&'}, $D{'`'}, $D{"'"}, $D{'+'}, @grp) = @_;
 	my $n = 0;
 	map { $D{++$n} = $_; } @grp;
-	$repl =~ s/\$(\x26\x60\x27\+[1-9])/$D{$1}/g;
+	undef $n;
+	sub replacer
+	{
+		my $backslashes = shift;
+		my $dollar = shift;
+		my $dollarchar = shift;
+		my $n_bs = length $backslashes;
+		my $real_escape = $n_bs % 2 == 0;
+		my $replacement;
+		
+		if($real_escape) { $replacement = "\\" x ($n_bs/2); }
+		else { $replacement = "\\" x (($n_bs-1)/2); }
+		if(length $dollar)
+		{
+			if($real_escape) { $replacement .= $D{$dollarchar}; }
+			else { $replacement .= $dollar.$dollarchar; }
+		}
+		return $replacement;
+	}
+	$repl =~ s/(?'backslashes'(\\)*)((?'dollar'\$)(?'dollarchar'[\x26\x60\x27+1-9])|)/replacer($+{'backslashes'}, $+{'dollar'}, $+{'dollarchar'})/eg;
 	return $repl;
 }
 
@@ -143,6 +162,15 @@ sub resolvealias
 	$a = "sourcename" if $a eq "ident";
 	$a = "severity" if $a eq "level";
 	return $a;
+}
+
+sub replace_templates
+{
+	my $strRef = shift;
+	my $varRef = shift;
+	my $codeRef = shift;
+	if(ref $codeRef ne 'CODE'){ $codeRef = sub{ return $_[0].$_[1]; }; }
+	$$strRef =~ s/(.*?)\{\{(.+?)\}\}/$codeRef->($1, $varRef->{resolvealias($2)})/eg;
 }
 
 sub selflog
@@ -377,15 +405,27 @@ sub process_rules
 					{
 						if($test =~ /^(tag|sourcename|msg)$/)
 						{
-							$value =~ s/\{\{(.+?)\}\}/$Var{resolvealias($1)}/eg;
-							
-							$rw{$test} = $value if $op eq ':=';
-							$rw{$test} = $value.$Var{$test} if $op eq '^=';
-							$rw{$test} = $Var{$test}.$value if $op eq '+=';
 							if($op eq ':~')
 							{
 								my ($patt, $repl) = split '~', $value, 2;
-								$rw{$test} =~ s{$patt}{repl($repl, $&, $`, $', $+, $1, $2, $3, $4, $5, $6, $7, $8, $9)}eg;
+								replace_templates(\$repl, \%Var, sub {
+									my ($pre, $var) = @_;
+									$pre =~ s/\\+$/$&$&/;  # escape backslashes directly preceeding a template variable
+									$var =~ s/[\$\\]/\\$&/g;  # escape dollar and backslashe chars in resolved variable to prevent expanding them as dollar-meta-chars
+									return $pre.$var;
+								});
+								my $newvalue = $Var{$test};
+								$newvalue =~ s{$patt}{replace_regexp($repl, $&, $`, $', $+, $1, $2, $3, $4, $5, $6, $7, $8, $9)}eg;
+								$rw{$test} = $newvalue;
+							}
+							else
+							{
+								my $newvalue = $value;
+								replace_templates(\$newvalue, \%Var);
+								
+								$rw{$test} = $newvalue if $op eq ':=';
+								$rw{$test} = $newvalue.$Var{$test} if $op eq '^=';
+								$rw{$test} = $Var{$test}.$newvalue if $op eq '+=';
 							}
 						}
 						else
@@ -675,7 +715,8 @@ sub logwall
 				$Var{"severity"} = $priority & 7;
 				$Var{"datetime"} = $+{'datetime'} || strftime("%b %e %H:%M:%S", localtime);
 				$Var{"tag"} = $+{'tag'};
-				($Var{"sourcename"}) = ($Var{"tag"} =~ /^([a-z0-9_\.,\/><-]+)/i);
+				$Var{"sourcename"} = $Var{"tag"};
+				$Var{"sourcename"} =~ s{([^[:print:]]|[[:/]).*}{};  # Trim everything from the first non-printable or ":", "[", "/" char.
 				($Var{"pid"}) = ($Var{"tag"} =~ /\[(\d+)\]:?$/);
 				
 				addstats({
