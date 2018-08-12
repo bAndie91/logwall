@@ -329,6 +329,7 @@ sub process_rules
 				{
 					my @all = qw/realpid proc_uid proc_gid proc_owner proc_group exe comm args exe_uid exe_gid exe_owner exe_group facility_name severity_name tag sourcename pid fifonick tee/;
 					my @allrw = grep {!/^(severity|facility)$/} keys %rw;
+					my ($value, $prefix) = split ';', $value, 2;
 					my ($wlevel, @attrs) = split ',', $value;
 					if($wlevel !~ /^\d+$/)
 					{
@@ -380,7 +381,7 @@ sub process_rules
 					if($test eq 'log')      { $attributesRef = \%Var; }
 					elsif($test eq 'rwlog') { $attributesRef = \%rw; }
 					
-					selflog $backend, $wlevel, join ' ', map
+					selflog $backend, $wlevel, $prefix . join ' ', map
 					{
 						my $str = $attributesRef->{$_};
 						if($str =~ /[ \x22\x5C]/)
