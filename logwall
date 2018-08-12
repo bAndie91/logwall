@@ -210,7 +210,7 @@ sub peerdata
 	my $argstr = "";
 	my $comm = "";
 	my @args;
-	my ($realpid, $puid, $pgid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
+	my ($realpid, $proc_uid, $proc_gid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
 	
 	if($realpid > 0)
 	{
@@ -230,7 +230,7 @@ sub peerdata
 		close $fh;
 	}
 	
-	return ($realpid, $puid, $pgid, $exe, $argstr, $comm, @args);
+	return ($realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args);
 }
 
 sub apply_rewrites
@@ -325,7 +325,7 @@ sub process_rules
 				
 				if($test ~~ ['log', 'rwlog'] and !$evaled_testexpr)
 				{
-					my @all = qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid fifonick tee/;
+					my @all = qw/realpid proc_uid proc_gid proc_owner proc_group exe comm args exe_uid exe_gid exe_owner exe_group facility_name severity_name tag sourcename pid fifonick tee/;
 					my @allrw = grep {!/^(severity|facility)$/} keys %rw;
 					my ($wlevel, @attrs) = split ',', $value;
 					if($wlevel !~ /^\d+$/)
@@ -392,7 +392,7 @@ sub process_rules
 					$evaled_testexpr = 1;
 				}
 				
-				if($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
+				if($test =~ /^(exe|proc_owner|proc_group|exe_owner|exe_group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
 				{
 					$evaled_testexpr = 1;
 					if($op eq '==')    { last TESTS unless $Var{$test} eq $value; }
@@ -475,7 +475,7 @@ sub process_rules
 					}
 				}
 				
-				if($test =~ /^(realpid|puid|pgid|uid|gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
+				if($test =~ /^(realpid|proc_uid|proc_gid|exe_uid|exe_gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
 				{
 					if($value !~ /^\d+$/)
 					{
@@ -628,7 +628,7 @@ sub logwall
 	my $rules;
 	my $stream_rules;
 	my %PeerVar;
-	for my $varname (qw/realpid puid pgid exe args comm/)
+	for my $varname (qw/realpid proc_uid proc_gid exe args comm/)
 	{
 		$PeerVar{$varname} = shift;
 	}
@@ -650,19 +650,19 @@ sub logwall
 	addstats({'forks' => {'count' => 1,},});
 	
 	
-	if(defined $PeerVar{"puid"})
+	if(defined $PeerVar{"proc_uid"})
 	{
-		($PeerVar{"powner"}) = getpwuid $PeerVar{"puid"};
+		($PeerVar{"proc_owner"}) = getpwuid $PeerVar{"proc_uid"};
 	}
-	if(defined $PeerVar{"pgid"})
+	if(defined $PeerVar{"proc_gid"})
 	{
-		($PeerVar{"pgroup"}) = getgrgid $PeerVar{"pgid"};
+		($PeerVar{"proc_group"}) = getgrgid $PeerVar{"proc_gid"};
 	}
 	if(defined $PeerVar{"exe"})
 	{
-		($PeerVar{"uid"}, $PeerVar{"gid"}) = ((stat $PeerVar{"exe"})[STAT_UID, STAT_GID]);
-		($PeerVar{"owner"}) = getpwuid $PeerVar{"uid"};
-		($PeerVar{"group"}) = getgrgid $PeerVar{"gid"};
+		($PeerVar{"exe_uid"}, $PeerVar{"exe_gid"}) = ((stat $PeerVar{"exe"})[STAT_UID, STAT_GID]);
+		($PeerVar{"exe_owner"}) = getpwuid $PeerVar{"exe_uid"};
+		($PeerVar{"exe_group"}) = getgrgid $PeerVar{"exe_gid"};
 	}
 	
 	if(defined $PeerVar{"comm"})
@@ -976,7 +976,7 @@ if($fork == 0)
 		1 while not accept($client, $frontend);
 		
 		##<< Race-Condition >>##
-		($realpid, $puid, $pgid, $exe, $argstr, $comm, @args) = peerdata($client);
+		($realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args) = peerdata($client);
 		
 		$kid = fork;
 		if(not defined $kid)
@@ -987,7 +987,7 @@ if($fork == 0)
 		{
 			undef %kids;
 			undef $pid_file;
-			logwall($client, $realpid, $puid, $pgid, $exe, $argstr, $comm, @args);
+			logwall($client, $realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args);
 			close $client;
 			exit;
 		}
