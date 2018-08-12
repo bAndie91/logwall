@@ -477,7 +477,7 @@ sub process_rules
 				
 				if($test =~ /^(realpid|proc_uid|proc_gid|exe_uid|exe_gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
 				{
-					if($value !~ /^\d+$/)
+					if($value !~ /^-?\d+$/)
 					{
 						if($test =~ /^p?([ug])id$/)
 						{
