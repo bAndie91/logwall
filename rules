@@ -154,14 +154,15 @@
 ##     $1 .. $9, $+, $`, $&, and $'
 ##
 ## Internal logging for debugging
-##   [log|rwlog]=SEVERITY,ATTRIBUTES
-##   ATTRIBUTES: [-]<testing keyword>, [facility|severity]_name, "ALL", "RWALL"
+##   [log|rwlog]=SEVERITY,ATTRIBUTES;PREFIX
+##   ATTRIBUTES: [-]<testing-keyword>, [facility|severity]_name, "ALL", "RWALL"
 ##     ALL expands to: realpid,proc_uid,proc_gid,proc_owner,proc_group,exe,comm,args,exe_uid,exe_gid,exe_owner,exe_group,facility_name,severity_name,tag,sourcename,pid
 ##        i.e. all testing keywords except msg
-##     RWALL expands to all so far rewritten attributes
+##     RWALL expands to all attributes which are rewritten so far
+##   PREFIX: arbitrary string prepended to the log
 ##   Examples:
-##     proc_owner==nobody  log=debug,ALL,-comm,-args
-##     tag=~/  log=debug,ALL,-exe_uid,-exe_gid,-exe_owner,-exe_group,msg
+##     proc_owner==nobody  log="debug,ALL,-comm,-args;Nobody: "
+##     tag=~/  log="debug,ALL,-exe_uid,-exe_gid,-exe_owner,-exe_group,msg;Path in tag: "
 ##     sourcename==test  msg:~test~TEST  rwlog=info log=info,severity_name,facility_name
 ##     sourcename==test  msg^="test: "  rwlog=debug,ALLRW,proc_owner,proc_group,exe
 ##
@@ -218,13 +219,13 @@ exe==/bin/su action=accept
 fifonick==supervisor action=accept
 
 # disallow high level messages from who we don't know
-exe=="" severity<error log=info action=drop
-proc_owner=="" severity<error log=info action=drop
+exe=="" severity<error log="info;Unknown exe: " action=drop
+proc_owner=="" severity<error log="info;Unknown process owner: " action=drop
 
 # allow only these for everyone else
 facility==user action=accept
 facility>=local1 facility!=local3 facility<=local7 action=accept
 
 # drop policy
-log=notice,ALL,msg action=drop
+log="notice,ALL,msg;Drop by policy: " action=drop
 
