@@ -161,6 +161,8 @@ sub resolvealias
 	my $a = shift;
 	$a = "sourcename" if $a eq "ident";
 	$a = "severity" if $a eq "level";
+	$a = "exe_$1" if $a =~ /^(owner|group|uid|gid)$/;
+	$a = "proc_$1" if $a =~ /^p(owner|group|uid|gid)$/;
 	return $a;
 }
 
