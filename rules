@@ -12,9 +12,9 @@
 ##     Log message's attributes:
 ##       facility**, severity**, tag, sourcename, pid*, msg
 ##     Logging process' attributes:
-##       realpid*, puid*, pgid*, powner, pgroup, exe, comm, args
+##       realpid*, proc_uid*, proc_gid*, proc_owner, proc_group, exe, comm, args
 ##     Process' executable file's attributes:
-##       uid*, gid*, owner, group
+##       exe_uid*, exe_gid*, exe_owner, exe_group
 ##     Other attributes:
 ##       fifonick, tee***
 ##
@@ -44,13 +44,13 @@
 ##   msg
 ##     valuable message
 ##   realpid
-##   puid
-##   pgid
+##   proc_uid
+##   proc_gid
 ##     authentic attributes of the log sender process got from socket's peer credentials from the kernel.
 ##     otherwise 0, -1, -1 respectively if peer credentials are not gotten.
-##   powner
-##   pgroup
-##     username and group name corresponding to puid and pgid.
+##   proc_owner
+##   proc_group
+##     username and groupname corresponding to proc_uid and proc_gid.
 ##   exe
 ##     executable file path of running process (see /proc/PID/exe).
 ##     it's an interpreter for scripts.
@@ -58,12 +58,12 @@
 ##   args
 ##     command name and command line arguments of running process (see /proc/PID/comm and /proc/PID/cmdline).
 ##     can be forged by user
-##   uid
-##   gid
+##   exe_uid
+##   exe_gid
 ##     executable file's owner and group owner (see exe)
-##   owner
-##   group
-##     username and group name corresponding to uid and gid
+##   exe_owner
+##   exe_group
+##     username and groupname corresponding to exe_uid and exe_gid
 ##   fifonick
 ##     empty for messages received on socket.
 ##     nickname for messages received on Fifo (see Fifo file specification)
@@ -139,7 +139,7 @@
 ## Variable substitution:
 ##   Testing keywords are substituted with their value
 ##   Example, appending the name of the user runnin the process to the ident field:
-##     facility==user sourcename+="-{{powner}}"
+##     facility==user sourcename+="-{{proc_owner}}"
 ##
 ## Regexp substitution:
 ##   Separate the pattern and the replacement with tilde `~' mark, eg:
@@ -156,19 +156,19 @@
 ## Internal logging for debugging
 ##   [log|rwlog]=SEVERITY,ATTRIBUTES
 ##   ATTRIBUTES: [-]<testing keyword>, [facility|severity]_name, "ALL", "RWALL"
-##     ALL expands to: realpid,puid,pgid,powner,pgroup,exe,comm,args,uid,gid,owner,group,facility_name,severity_name,tag,sourcename,pid
+##     ALL expands to: realpid,proc_uid,proc_gid,proc_owner,proc_group,exe,comm,args,exe_uid,exe_gid,exe_owner,exe_group,facility_name,severity_name,tag,sourcename,pid
 ##        i.e. all testing keywords except msg
 ##     RWALL expands to all so far rewritten attributes
 ##   Examples:
-##     powner==nobody  log=debug,ALL,-comm,-args
-##     tag=~/  log=debug,ALL,-uid,-gid,-owner,-group,msg
+##     proc_owner==nobody  log=debug,ALL,-comm,-args
+##     tag=~/  log=debug,ALL,-exe_uid,-exe_gid,-exe_owner,-exe_group,msg
 ##     sourcename==test  msg:~test~TEST  rwlog=info log=info,severity_name,facility_name
-##     sourcename==test  msg^="test: "  rwlog=debug,ALLRW,powner,pgroup,exe
+##     sourcename==test  msg^="test: "  rwlog=debug,ALLRW,proc_owner,proc_group,exe
 ##
 ## Examples:
-##   powner!=root action=drop
+##   proc_owner!=root action=drop
 ##   severity>crit action=accept
-##   severity<=crit puid>=1000 log=info action=drop
+##   severity<=crit proc_uid>=1000 log=info action=drop
 ##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
 ##
 ## Fifo name specification
@@ -192,7 +192,7 @@
 ### Rewrites ###
 
 sourcename=*cron sourcename:=cron
-sourcename==cupsd powner==root facility==user facility:=lpr
+sourcename==cupsd proc_owner==root facility==user facility:=lpr
 sourcename==/etc/mysql/debian-start sourcename:=mysqld-debian
 sourcename==/etc/init.d/mysql sourcename:=mysqld-debian
 sourcename==apcupsd msg=~"Power failure" severity:=crit
@@ -207,7 +207,7 @@ fifonick!="" tag:=fifo-{{fifonick}}
 ### Filters ###
 
 # most system processes
-puid<1000 puid!=-1 action=accept
+proc_uid!=-1 proc_uid<1000 action=accept
 
 # trusted programms
 exe==/sbin/unix_chkpwd action=accept
@@ -219,7 +219,7 @@ fifonick==supervisor action=accept
 
 # disallow high level messages from who we don't know
 exe=="" severity<error log=info action=drop
-powner=="" severity<error log=info action=drop
+proc_owner=="" severity<error log=info action=drop
 
 # allow only these for everyone else
 facility==user action=accept

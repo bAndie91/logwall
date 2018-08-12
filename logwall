@@ -161,6 +161,8 @@ sub resolvealias
 	my $a = shift;
 	$a = "sourcename" if $a eq "ident";
 	$a = "severity" if $a eq "level";
+	$a = "exe_$1" if $a =~ /^(owner|group|uid|gid)$/;
+	$a = "proc_$1" if $a =~ /^p(owner|group|uid|gid)$/;
 	return $a;
 }
 
@@ -210,7 +212,7 @@ sub peerdata
 	my $argstr = "";
 	my $comm = "";
 	my @args;
-	my ($realpid, $puid, $pgid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
+	my ($realpid, $proc_uid, $proc_gid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
 	
 	if($realpid > 0)
 	{
@@ -230,7 +232,7 @@ sub peerdata
 		close $fh;
 	}
 	
-	return ($realpid, $puid, $pgid, $exe, $argstr, $comm, @args);
+	return ($realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args);
 }
 
 sub apply_rewrites
@@ -286,16 +288,16 @@ sub process_rules
 	local $/ = "\n";
 	
 	RULES:
-	while(my $_ = <$rules>)
+	while(my $rule_line = <$rules>)
 	{
 		$nl++;
 		
 		TESTS:
 		while(1)
 		{
-		    if(/^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
+		    if($rule_line =~ /^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
 		    {
-				$_ = $';
+				$rule_line = $';
 				my ($test, $op, $value) = ($1, $2, $3);
 				$value = $1 if $value =~ /^"([^""]*)"$/;
 				$test = resolvealias(lc $test);
@@ -325,7 +327,7 @@ sub process_rules
 				
 				if($test ~~ ['log', 'rwlog'] and !$evaled_testexpr)
 				{
-					my @all = qw/realpid puid pgid powner pgroup exe comm args uid gid owner group facility_name severity_name tag sourcename pid fifonick tee/;
+					my @all = qw/realpid proc_uid proc_gid proc_owner proc_group exe comm args exe_uid exe_gid exe_owner exe_group facility_name severity_name tag sourcename pid fifonick tee/;
 					my @allrw = grep {!/^(severity|facility)$/} keys %rw;
 					my ($wlevel, @attrs) = split ',', $value;
 					if($wlevel !~ /^\d+$/)
@@ -392,7 +394,7 @@ sub process_rules
 					$evaled_testexpr = 1;
 				}
 				
-				if($test =~ /^(exe|powner|pgroup|owner|group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
+				if($test =~ /^(exe|proc_owner|proc_group|exe_owner|exe_group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
 				{
 					$evaled_testexpr = 1;
 					if($op eq '==')    { last TESTS unless $Var{$test} eq $value; }
@@ -475,13 +477,42 @@ sub process_rules
 					}
 				}
 				
-				if($test =~ /^(realpid|puid|pgid|uid|gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
+				if($test =~ /^(realpid|proc_uid|proc_gid|exe_uid|exe_gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
 				{
-					$evaled_testexpr = 1;
-					$value = int $value;
+					if($value !~ /^-?\d+$/)
+					{
+						if($test =~ /^p?([ug])id$/)
+						{
+							my $ent;
+							if($1 eq 'u') { $ent = getpwnam $value; }
+							else { $ent = getgrnam $value; }
+							if(defined $ent)
+							{
+								$value = $ent->[2];
+							}
+							else
+							{
+								# Can not resolve user/group name.
+								# Force fail this rule.
+								last TESTS;
+							}
+						}
+						elsif($test eq "tee")
+						{
+							selflog $backend, $sevnum{'err'}, "keyword '$test' with '$op' operator takes numeric right-value on line $nl";
+							last TESTS;
+						}
+						else
+						{
+							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric right-value on line $nl";
+							last TESTS;
+						}
+					}
+					
 					if($op =~ /^(==|!=|>=|<=|>|<)$/)
 					{
 						my $testint = int $Var{$test};
+						$evaled_testexpr = 1;
 						last TESTS unless eval qq{$testint $op $value};
 					}
 					elsif($op eq ':=')
@@ -490,15 +521,16 @@ sub process_rules
 						{
 							$rw{$test} = $value;
 							$rw{$test.'_name'} = $Names{$test}->[$value];
+							$evaled_testexpr = 1;
 						}
 						elsif($test eq 'pid')
 						{
 							$rw{$test} = $value;
+							$evaled_testexpr = 1;
 						}
 						else
 						{
 							selflog $backend, $sevnum{'warn'}, "attribute '$test' is not rewritable on line $nl";
-							$evaled_testexpr = 0;
 						}
 					}
 					else
@@ -511,7 +543,6 @@ sub process_rules
 						{
 							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric relation or ':=' operator, but '$op' was found on line $nl";
 						}
-						$evaled_testexpr = 0;
 						last TESTS;
 					}
 				}
@@ -541,11 +572,11 @@ sub process_rules
 		    
 		    else
 		    {
-				s/\s*$//;
-				s/\s*(\x23.*)?$//;
-				if(length)
+				$rule_line =~ s/\s*$//;
+				$rule_line =~ s/\s*(\x23.*)?$//;
+				if(length $rule_line)
 				{
-					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$_'";
+					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$rule_line'";
 				}
 				last TESTS;
 			}
@@ -599,7 +630,7 @@ sub logwall
 	my $rules;
 	my $stream_rules;
 	my %PeerVar;
-	for my $varname (qw/realpid puid pgid exe args comm/)
+	for my $varname (qw/realpid proc_uid proc_gid exe args comm/)
 	{
 		$PeerVar{$varname} = shift;
 	}
@@ -621,19 +652,19 @@ sub logwall
 	addstats({'forks' => {'count' => 1,},});
 	
 	
-	if(defined $PeerVar{"puid"})
+	if(defined $PeerVar{"proc_uid"})
 	{
-		($PeerVar{"powner"}) = getpwuid $PeerVar{"puid"};
+		($PeerVar{"proc_owner"}) = getpwuid $PeerVar{"proc_uid"};
 	}
-	if(defined $PeerVar{"pgid"})
+	if(defined $PeerVar{"proc_gid"})
 	{
-		($PeerVar{"pgroup"}) = getgrgid $PeerVar{"pgid"};
+		($PeerVar{"proc_group"}) = getgrgid $PeerVar{"proc_gid"};
 	}
 	if(defined $PeerVar{"exe"})
 	{
-		($PeerVar{"uid"}, $PeerVar{"gid"}) = ((stat $PeerVar{"exe"})[STAT_UID, STAT_GID]);
-		($PeerVar{"owner"}) = getpwuid $PeerVar{"uid"};
-		($PeerVar{"group"}) = getgrgid $PeerVar{"gid"};
+		($PeerVar{"exe_uid"}, $PeerVar{"exe_gid"}) = ((stat $PeerVar{"exe"})[STAT_UID, STAT_GID]);
+		($PeerVar{"exe_owner"}) = getpwuid $PeerVar{"exe_uid"};
+		($PeerVar{"exe_group"}) = getgrgid $PeerVar{"exe_gid"};
 	}
 	
 	if(defined $PeerVar{"comm"})
@@ -947,7 +978,7 @@ if($fork == 0)
 		1 while not accept($client, $frontend);
 		
 		##<< Race-Condition >>##
-		($realpid, $puid, $pgid, $exe, $argstr, $comm, @args) = peerdata($client);
+		($realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args) = peerdata($client);
 		
 		$kid = fork;
 		if(not defined $kid)
@@ -958,7 +989,7 @@ if($fork == 0)
 		{
 			undef %kids;
 			undef $pid_file;
-			logwall($client, $realpid, $puid, $pgid, $exe, $argstr, $comm, @args);
+			logwall($client, $realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args);
 			close $client;
 			exit;
 		}

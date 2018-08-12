@@ -1,5 +1,5 @@
 # Note. You can use only process-level testing keywords and 'action' keyword here:
-# realpid, puid, pgid, powner, pgroup, exe, comm, args, uid, gid, owner, group, fifonick, action
+# realpid, proc_uid, proc_gid, proc_owner, proc_group, exe, comm, args, exe_uid, exe_gid, exe_owner, exe_group, fifonick, action
 # Testing message-level attributes (eg. facility, severity, msg), rewrites, and 'tee' action results in undefined behavior.
 # Extra rewrites works only here:
 #   terminator - set syslog datagram terminator char (normally \x00 on sockets, \x0A on FIFOs)
