@@ -169,7 +169,7 @@
 ##   proc_owner!=root action=drop
 ##   severity>crit action=accept
 ##   severity<=crit proc_uid>=1000 log=info action=drop
-##   sourcename==/USR/SBIN/CRON sourcename:=CRON rwlog=debug
+##   tag=~^/USR/SBIN/CRON sourcename:=CRON rwlog=debug
 ##
 ## Fifo name specification
 ##
@@ -191,10 +191,10 @@
 
 ### Rewrites ###
 
-sourcename=*cron sourcename:=cron
+tag=*cron sourcename:=cron
 sourcename==cupsd proc_owner==root facility==user facility:=lpr
-sourcename==/etc/mysql/debian-start sourcename:=mysqld-debian
-sourcename==/etc/init.d/mysql sourcename:=mysqld-debian
+tag=~^/etc/mysql/debian-start sourcename:=mysqld-debian
+tag=~^/etc/init.d/mysql sourcename:=mysqld-debian
 sourcename==apcupsd msg=~"Power failure" severity:=crit
 
 # enforce "fifo-" prefox for messages arrived on fifo
