@@ -286,16 +286,16 @@ sub process_rules
 	local $/ = "\n";
 	
 	RULES:
-	while(my $_ = <$rules>)
+	while(my $rule_line = <$rules>)
 	{
 		$nl++;
 		
 		TESTS:
 		while(1)
 		{
-		    if(/^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
+		    if($rule_line =~ /^\s*([a-z]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
 		    {
-				$_ = $';
+				$rule_line = $';
 				my ($test, $op, $value) = ($1, $2, $3);
 				$value = $1 if $value =~ /^"([^""]*)"$/;
 				$test = resolvealias(lc $test);
@@ -477,11 +477,40 @@ sub process_rules
 				
 				if($test =~ /^(realpid|puid|pgid|uid|gid|facility|severity|pid|tee)$/ and !$evaled_testexpr)
 				{
-					$evaled_testexpr = 1;
-					$value = int $value;
+					if($value !~ /^\d+$/)
+					{
+						if($test =~ /^p?([ug])id$/)
+						{
+							my $ent;
+							if($1 eq 'u') { $ent = getpwnam $value; }
+							else { $ent = getgrnam $value; }
+							if(defined $ent)
+							{
+								$value = $ent->[2];
+							}
+							else
+							{
+								# Can not resolve user/group name.
+								# Force fail this rule.
+								last TESTS;
+							}
+						}
+						elsif($test eq "tee")
+						{
+							selflog $backend, $sevnum{'err'}, "keyword '$test' with '$op' operator takes numeric right-value on line $nl";
+							last TESTS;
+						}
+						else
+						{
+							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric right-value on line $nl";
+							last TESTS;
+						}
+					}
+					
 					if($op =~ /^(==|!=|>=|<=|>|<)$/)
 					{
 						my $testint = int $Var{$test};
+						$evaled_testexpr = 1;
 						last TESTS unless eval qq{$testint $op $value};
 					}
 					elsif($op eq ':=')
@@ -490,15 +519,16 @@ sub process_rules
 						{
 							$rw{$test} = $value;
 							$rw{$test.'_name'} = $Names{$test}->[$value];
+							$evaled_testexpr = 1;
 						}
 						elsif($test eq 'pid')
 						{
 							$rw{$test} = $value;
+							$evaled_testexpr = 1;
 						}
 						else
 						{
 							selflog $backend, $sevnum{'warn'}, "attribute '$test' is not rewritable on line $nl";
-							$evaled_testexpr = 0;
 						}
 					}
 					else
@@ -511,7 +541,6 @@ sub process_rules
 						{
 							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric relation or ':=' operator, but '$op' was found on line $nl";
 						}
-						$evaled_testexpr = 0;
 						last TESTS;
 					}
 				}
@@ -541,11 +570,11 @@ sub process_rules
 		    
 		    else
 		    {
-				s/\s*$//;
-				s/\s*(\x23.*)?$//;
-				if(length)
+				$rule_line =~ s/\s*$//;
+				$rule_line =~ s/\s*(\x23.*)?$//;
+				if(length $rule_line)
 				{
-					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$_'";
+					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$rule_line'";
 				}
 				last TESTS;
 			}
