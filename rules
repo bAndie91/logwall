@@ -27,7 +27,7 @@
 ##       ident = sourcename
 ##
 ##   Action keywords:
-##     action, log, rwlog, tee
+##     action, log, tee
 ##
 ## Explanation:
 ##
@@ -154,23 +154,23 @@
 ##     $1 .. $9, $+, $`, $&, and $'
 ##
 ## Internal logging for debugging
-##   [log|rwlog]=SEVERITY,ATTRIBUTES;PREFIX
-##   ATTRIBUTES: [-]<testing-keyword>, [facility|severity]_name, "ALL", "RWALL"
-##     ALL expands to: realpid,proc_uid,proc_gid,proc_owner,proc_group,exe,comm,args,exe_uid,exe_gid,exe_owner,exe_group,facility_name,severity_name,tag,sourcename,pid
-##        i.e. all testing keywords except msg
-##     RWALL expands to all attributes which are rewritten so far
-##   PREFIX: arbitrary string prepended to the log
+##   log=SEVERITY,ATTRIBUTES;PREFIX
+##   ATTRIBUTES is a comma-delimited list of [<testing-keyword> | [facility|severity]_name | "ALL"],
+##   each of them is optionally prefixed with "-" (negation).
+##     "ALL" expands to: realpid,proc_uid,proc_gid,proc_owner,proc_group,exe,comm,args,exe_uid,exe_gid,exe_owner,exe_group,facility_name,severity_name,tag,sourcename,pid
+##        i.e. all testing keywords except 'msg'
+##   PREFIX is an arbitrary string prepended to the log
 ##   Examples:
 ##     proc_owner==nobody  log="debug,ALL,-comm,-args;Nobody: "
 ##     tag=~/  log="debug,ALL,-exe_uid,-exe_gid,-exe_owner,-exe_group,msg;Path in tag: "
-##     sourcename==test  msg:~test~TEST  rwlog=info log=info,severity_name,facility_name
-##     sourcename==test  msg^="test: "  rwlog=debug,ALLRW,proc_owner,proc_group,exe
+##     sourcename==test  msg:~test~TEST  log=info,severity_name,facility_name
+##     sourcename==test  msg^="test: "  log=debug,ALL,proc_owner,proc_group,exe
 ##
 ## Examples:
 ##   proc_owner!=root action=drop
 ##   severity>crit action=accept
 ##   severity<=crit proc_uid>=1000 log=info action=drop
-##   tag=~^/USR/SBIN/CRON sourcename:=CRON rwlog=debug
+##   tag=~^/USR/SBIN/CRON sourcename:=CRON log=debug
 ##
 ## Fifo name specification
 ##
@@ -202,7 +202,7 @@ sourcename==apcupsd msg=~"Power failure" severity:=crit
 fifonick!="" tag:=fifo-{{fifonick}}
 
 # log all logs
-#log=debug rwlog=debug
+#log=debug
 
 
 ### Filters ###

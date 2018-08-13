@@ -347,10 +347,9 @@ sub process_rules
 					else { selflog $backend, $sevnum{'err'}, "keyword '$test' takes 'drop' or 'accept' on line $nl"; }
 				}
 				
-				if($test ~~ ['log', 'rwlog'] and !$evaled_testexpr)
+				if($test eq 'log' and !$evaled_testexpr)
 				{
 					my @all = qw/realpid proc_uid proc_gid proc_owner proc_group exe comm args exe_uid exe_gid exe_owner exe_group facility_name severity_name tag sourcename pid fifonick tee/;
-					my @allrw = grep {!/^(severity|facility)$/} keys %rwVar;  # FIXME
 					my ($value, $logprefix) = split ';', $value, 2;
 					my ($wlevel, @attrs) = split ',', $value;
 					if($wlevel !~ /^\d+$/)
@@ -365,8 +364,7 @@ sub process_rules
 					
 					if(not @attrs)
 					{
-						if($test eq 'log') { @attrs = @all; }
-						elsif($test eq 'rwlog') { @attrs = @allrw; }
+						@attrs = @all;
 					}
 					else
 					{
@@ -374,7 +372,6 @@ sub process_rules
 						for my $attr (@attrs)
 						{
 							if($attr eq 'ALL') { push @newattrs, @all; }
-							elsif($attr eq 'ALLRW') { push @newattrs, @allrw; }
 							elsif($attr =~ /^-(.+)/)
 							{
 								my $ex = resolvealias($1);
@@ -388,12 +385,9 @@ sub process_rules
 						@attrs = @newattrs;
 					}
 					
-					if($test eq 'log')      { $attributesRef = $EventVarRef; }
-					elsif($test eq 'rwlog') { $attributesRef = \%rwVar; }  # FIXME
-					
 					selflog $backend, $wlevel, $logprefix . join ' ', map
 					{
-						my $str = $attributesRef->{$_};
+						my $str = $RuleVar{$_};
 						if($str =~ /[ \x22\x5C]/)
 						{
 							$str =~ s/[\x22\x5C]/\\$&/g;
