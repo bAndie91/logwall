@@ -128,32 +128,34 @@ sub addstats
 sub replace_regexp
 {
 	my $repl;
-	my %D;
+	my %backref;
 	my @grp;
-	($repl, $D{'&'}, $D{'`'}, $D{"'"}, $D{'+'}, @grp) = @_;
+	($repl, $backref{'&'}, $backref{'`'}, $backref{"'"}, $backref{'+'}, @grp) = @_;
 	my $n = 0;
-	map { $D{++$n} = $_; } @grp;
+	map { $backref{++$n} = $_; } @grp;
 	undef $n;
-	sub replacer
-	{
-		my $backslashes = shift;
-		my $dollar = shift;
-		my $dollarchar = shift;
-		my $n_bs = length $backslashes;
-		my $real_escape = $n_bs % 2 == 0;
-		my $replacement;
-		
-		if($real_escape) { $replacement = "\\" x ($n_bs/2); }
-		else { $replacement = "\\" x (($n_bs-1)/2); }
-		if(length $dollar)
-		{
-			if($real_escape) { $replacement .= $D{$dollarchar}; }
-			else { $replacement .= $dollar.$dollarchar; }
-		}
-		return $replacement;
-	}
-	$repl =~ s/(?'backslashes'(\\)*)((?'dollar'\$)(?'dollarchar'[\x26\x60\x27+1-9])|)/replacer($+{'backslashes'}, $+{'dollar'}, $+{'dollarchar'})/eg;
+	$repl =~ s/(?'backslashes'(\\)*)((?'dollar'\$)(?'dollarchar'[\x26\x60\x27+1-9])|)/replace_regexp_inner_replacer($+{'backslashes'}, $+{'dollar'}, $+{'dollarchar'}, \%backref)/eg;
 	return $repl;
+}
+
+sub replace_regexp_inner_replacer
+{
+	my $backslashes = shift;
+	my $dollar = shift;
+	my $dollarchar = shift;
+	my $backref = shift;
+	my $n_bs = length $backslashes;
+	my $real_escape = $n_bs % 2 == 0;
+	my $replacement;
+	
+	if($real_escape) { $replacement = "\\" x ($n_bs/2); }
+	else { $replacement = "\\" x (($n_bs-1)/2); }
+	if(length $dollar)
+	{
+		if($real_escape) { $replacement .= $backref->{$dollarchar}; }
+		else { $replacement .= $dollar.$dollarchar; }
+	}
+	return $replacement;
 }
 
 sub resolvealias
