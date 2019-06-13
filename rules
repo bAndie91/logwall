@@ -16,7 +16,7 @@
 ##     Process' executable file's attributes:
 ##       exe_uid*, exe_gid*, exe_owner, exe_group
 ##     Other attributes:
-##       fifonick, tee***
+##       sourcenick, sourcefile, tee***
 ##
 ##     *=Takes numeric right value
 ##     **=Takes numeric right value or facility/serverity name
@@ -64,9 +64,11 @@
 ##   exe_owner
 ##   exe_group
 ##     username and groupname corresponding to exe_uid and exe_gid
-##   fifonick
+##   sourcenick
 ##     empty for messages received on socket.
 ##     nickname for messages received on Fifo (see Fifo file specification)
+##   sourcefile
+##     path for fifo and kmsg type log sources, empty otherwise
 ##   tee
 ##     as a testing keyword it checks the current message's "tee ID" which comes from an earlier tee action.
 ##     as an action keyword, it clones the current message and gives a "tee ID" (right value) to the resulting message.
@@ -199,7 +201,7 @@ tag=~^/etc/init.d/mysql sourcename:=mysqld-debian
 sourcename==apcupsd msg=~"Power failure" severity:=crit
 
 # enforce "fifo-" prefox for messages arrived on fifo
-fifonick!="" tag:=fifo-{{fifonick}}
+sourcenick!="" tag:=fifo-{{fifonick}}
 
 # log all logs
 #log=debug

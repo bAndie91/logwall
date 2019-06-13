@@ -31,6 +31,7 @@ $stream_rules_file = "/etc/logwall/stream-rules";
 $pid_file = "/var/run/logwall.pid";
 $stats_file = "/var/run/shm/logwall-stats.json";
 @fifo_listeners = ();
+@kmsg_listeners = ();
 $quiet = 0;
 
 Getopt::Long::Configure(qw/no_ignore_case/);
@@ -42,6 +43,7 @@ GetOptions(
     'P|pidfile=s'   => \$pid_file,
     'S|statsfile=s' => \$stats_file,
     'f|fifo=s@'     => \@fifo_listeners,
+    'k|kmsg=s@'     => \@kmsg_listeners,
     'q|quiet'       => \$quiet,
     'help'          => sub {
     	print "Options:
@@ -52,12 +54,13 @@ GetOptions(
  --pidfile, -P     File to write PID into ($pid_file)
  --statsfile, -S   File to write and update statistics in JSON format into ($stats_file)
  --fifo, -f        Fifo specifications to listen to raw log messages on
+ --kmsg, -k        Read logs from kmsg/logcat type files
  --quiet, -q       Output less messages at start
 ";
     	exit;
     },
 )
-or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]\n");
+or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-k <kmsg> [-k <kmsg> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]\n");
 
 
 
@@ -349,7 +352,7 @@ sub process_rules
 				
 				if($test eq 'log' and !$evaled_testexpr)
 				{
-					my @all = qw/realpid proc_uid proc_gid proc_owner proc_group exe comm args exe_uid exe_gid exe_owner exe_group facility_name severity_name tag sourcename pid fifonick tee/;
+					my @all = qw/realpid proc_uid proc_gid proc_owner proc_group exe comm args exe_uid exe_gid exe_owner exe_group facility_name severity_name tag sourcename pid sourcenick sourcefile tee/;
 					my ($value, $logprefix) = split ';', $value, 2;
 					my ($wlevel, @attrs) = split ',', $value;
 					if($wlevel !~ /^\d+$/)
@@ -399,7 +402,7 @@ sub process_rules
 					$evaled_testexpr = 1;
 				}
 				
-				if($test =~ /^(exe|proc_owner|proc_group|exe_owner|exe_group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
+				if($test =~ /^(exe|proc_owner|proc_group|exe_owner|exe_group|tag|sourcename|msg|comm|args|sourcenick|sourcefile|tee)$/ and !$evaled_testexpr)
 				{
 					$evaled_testexpr = 1;
 					if($op eq '==')    { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} eq $value; }
@@ -465,7 +468,7 @@ sub process_rules
 										},
 										'facility' => {$facnam[$TeeVar{"facility"}] => 1,},
 										'severity' => {$sevnam[$TeeVar{"severity"}] => 1,},
-										'fifo' => {$TeeVar{"fifonick"} => 1,},
+										'fifo' => {$TeeVar{"sourcenick"} => 1,},
 									},
 								},
 							});
@@ -649,23 +652,37 @@ sub logwall
 	my $rules;
 	my $stream_rules;
 	my %PeerVar;
-	for my $varname (qw/realpid proc_uid proc_gid exe args comm/)
+	my @args;
+
+	if($_[0] =~ /^\d+$/)
 	{
-		$PeerVar{$varname} = shift;
-	}
-	# Note. $PeerVar{args} is the space-delimited string (argstr) containing arguments.
-	# @args is the list of arguments 1-by-1 (unused).
-	my @args = @_;
-	if($PeerVar{"realpid"} !~ /^\d+$/)
-	{
-		# This is a Fifo connection, 
-		# the 2nd arg is the Fifo's nick name, other args are undefined.
-		$PeerVar{"fifonick"} = $PeerVar{"realpid"};
-		$PeerVar{"realpid"} = 0;
+		for my $varname (qw/realpid proc_uid proc_gid exe args comm/)
+		{
+			$PeerVar{$varname} = shift;
+		}
+		# NOTE: $PeerVar{args} is the space-delimited string (argstr) containing arguments.
+		# @args is the list of arguments 1-by-1 (unused).
+		@args = @_;
+		$PeerVar{"sourcenick"} = "";
+		$PeerVar{"sourcefile"} = "";
 	}
 	else
 	{
-		$PeerVar{"fifonick"} = "";
+		# This is not a socket (/dev/log) connection
+		if($_[0] ne '')
+		{
+			# the next args are the Fifo's nick name and path, other args are undefined.
+			$PeerVar{"sourcenick"} = $_[0];
+			$PeerVar{"sourcefile"} = $_[1];
+			$PeerVar{"realpid"} = 0;
+		}
+		else
+		{
+			# it's a kmsg type log source.
+			$PeerVar{"sourcenick"} = '';
+			$PeerVar{"sourcefile"} = $arg2;
+			$PeerVar{"realpid"} = 0;
+		}
 	}
 	
 	addstats({'forks' => {'count' => 1,},});
@@ -698,7 +715,7 @@ sub logwall
 	{
 		$0 = "logwall: ".$PeerVar{"realpid"};
 	}
-	# else: fifonick process title has been set earlier
+	# else: sourcenick process title has been set earlier
 
 
 	if(!socket($backend, AF_UNIX, SOCK_DGRAM, 0))
@@ -735,7 +752,7 @@ sub logwall
 		local $/;
 		if(not defined $PeerVar{"terminator"})
 		{
-			if($PeerVar{"fifonick"} ne "") { $PeerVar{"terminator"} = "\n"; }
+			if($PeerVar{"sourcenick"} ne "") { $PeerVar{"terminator"} = "\n"; }
 			else { $PeerVar{"terminator"} = "\x00"; }
 		}
 		$/ = $PeerVar{"terminator"};
@@ -778,21 +795,21 @@ sub logwall
 					},
 				});
 			}
-			elsif($PeerVar{"fifonick"} ne "")
+			elsif($PeerVar{"sourcenick"} ne "")
 			{
 				# Treat this line is a raw log message written to a Fifo.
 				$EventVar{"msg"} = $_;
 				$EventVar{"facility"} = $facnum{'user'};
 				$EventVar{"severity"} = $sevnum{'notice'};
 				$EventVar{"datetime"} = strftime("%b %e %H:%M:%S", localtime);
-				$EventVar{"tag"} = "fifo-".$PeerVar{"fifonick"};
-				$EventVar{"sourcename"} = "fifo-".$PeerVar{"fifonick"};
+				$EventVar{"tag"} = "fifo-".$PeerVar{"sourcenick"};
+				$EventVar{"sourcename"} = "fifo-".$PeerVar{"sourcenick"};
 				$EventVar{"pid"} = '';
 				
 				addstats({
 					'messages' => {
 						'received' => {
-							'fifo' => {$PeerVar{"fifonick"} => 1,},
+							'fifo' => {$PeerVar{"sourcenick"} => 1,},
 							'size' => {'message' => length $EventVar{'msg'},},
 						},
 					},
@@ -922,6 +939,15 @@ for my $fifospec (@fifo_listeners)
 	print STDERR "Created\n" if !$quiet;
 }
 
+for my $file_path (@kmsg_listeners)
+{
+	$str = "Kmsg listener: $file_path: ";
+	print STDERR $str if !$quiet;
+	open my $x, '<', $file_path or early_die $str;
+	close $x;
+	print STDERR "Opened once\n" if !$quiet;
+}
+
 $str = "Backend: $sock_connect: ";
 print STDERR $str if !$quiet;
 socket($backend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
@@ -979,7 +1005,7 @@ if($fork == 0)
 				my $openmode = '<';  # blocking until someone write onto the fifo
 				open my $client, $openmode, $file;
 				$0 = "logwall: $nick (open)";
-				logwall($client, $nick);
+				logwall($client, $nick, $file);
 				close $client;
 			}
 			exit;
@@ -991,12 +1017,43 @@ if($fork == 0)
 	}
 	
 	
+	# Start kmsg listeners
+	for my $file_path (@kmsg_listeners)
+	{
+		my ($basename) = ($file_path =~ /([^\/]+)$/);
+		
+		$kid = fork;
+		if(not defined $kid)
+		{
+			warn "$!\n";
+		}
+		elsif($kid == 0)
+		{
+			undef %kids;
+			undef $pid_file;
+			while(1)
+			{
+				$0 = "logwall: $basename (closed)";
+				open my $kmsg, '<', $file_path;
+				$0 = "logwall: $basename (open)";
+				logwall($kmsg, '', $file_path);
+				close $kmsg;
+			}
+			exit;
+		}
+		else
+		{
+			$kids{$kid} = 1;
+		}
+	}
+	
+	
 	# Start Socket listener
 	
    	ACCEPT:
 		1 while not accept($client, $frontend);
 		
-		##<< Race-Condition >>##
+		## Race-Condition - peer process might have exited now ##
 		($realpid, $proc_uid, $proc_gid, $exe, $argstr, $comm, @args) = peerdata($client);
 		
 		$kid = fork;
