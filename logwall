@@ -125,6 +125,24 @@ sub addstats
 	close $fh;
 }
 
+sub robust_write
+{
+	my ($fd, $data) = @_;
+	while(1)
+	{
+		my $ok = print {$fd} $data;
+		if(!$ok)
+		{
+			if($!{'ECONNREFUSED'} or $!{'EAGAIN'} or $!{'EWOULDBLOCK'} or $!{'ENOTCONN'})
+			{
+				# Try again, hope it's recovered ASAP.
+				next;
+			}
+		}
+		return $ok;
+	}
+}
+
 sub replace_regexp
 {
 	my $repl;
@@ -183,7 +201,7 @@ sub selflog
 	my $backend = shift;
 	my $str = mklogline($facnum{'syslog'}, $_[0], strftime("%b %e %H:%M:%S", localtime), "logwall[$$]:", $_[1]);
 	print STDERR $str if !$quiet;
-	my $printOK = print {$backend} $str;
+	my $printOK = robust_write $backend, $str;
 	
 	addstats({
 		'messages' => {
@@ -627,7 +645,7 @@ sub process_rules_and_send_log
 		# Compose output log message.
 		my $raw = mklogline($EventVarRef->{'facility'}, $EventVarRef->{'severity'}, $EventVarRef->{'datetime'}, $EventVarRef->{'tag'}, $EventVarRef->{'msg'});
 		# Send to syslog daemon.
-		my $printOK = print {$backend} $raw;
+		my $printOK = robust_write $backend, $raw;
 		my %errorcode;
 		if(!$printOK)
 		{
