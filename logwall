@@ -653,6 +653,7 @@ sub logwall
 	my $stream_rules;
 	my %PeerVar;
 	my @args;
+	my $sourcetype;
 
 	if($_[0] =~ /^\d+$/)
 	{
@@ -665,6 +666,7 @@ sub logwall
 		@args = @_;
 		$PeerVar{"sourcenick"} = "";
 		$PeerVar{"sourcefile"} = "";
+		$sourcetype = 'syslog';
 	}
 	else
 	{
@@ -675,6 +677,7 @@ sub logwall
 			$PeerVar{"sourcenick"} = $_[0];
 			$PeerVar{"sourcefile"} = $_[1];
 			$PeerVar{"realpid"} = 0;
+			$sourcetype = 'fifo';
 		}
 		else
 		{
@@ -682,6 +685,7 @@ sub logwall
 			$PeerVar{"sourcenick"} = '';
 			$PeerVar{"sourcefile"} = $arg2;
 			$PeerVar{"realpid"} = 0;
+			$sourcetype = 'kmsg';
 		}
 	}
 	
@@ -773,7 +777,31 @@ sub logwall
 			PROCESS_MESSAGE:
 			s/\Q$PeerVar{"terminator"}\E$//;
 			
-			if(/^<(?'priority'\d{1,3})>\s*(?'datetime'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ ]?0*([12]?[0-9]|3[01]) 0*(1?[0-9]|2[0-3])(:0*([1-5]?[0-9])){2})\s+(?'tag'\S+) / ||
+			if($sourcetype eq "kmsg")
+			{
+				my %stats_add;
+				if(/^<(?'severity'\d)>/)
+				{
+					$EventVar{"msg"} = $';
+					$EventVar{"severity"} = $+{'severity'};
+					$stats_add{'messages'}->{'received'}->{'severity'}->{$sevnam[$EventVar{"severity"}]} = 1;
+				}
+				else
+				{
+					$EventVar{"msg"} = $_;
+					$EventVar{"severity"} = $sevnum{'notice'};
+				}
+				$EventVar{"facility"} = $facnum{'kern'};
+				$EventVar{"datetime"} = strftime("%b %e %H:%M:%S", localtime);
+				$EventVar{"tag"} = '';
+				$EventVar{"sourcename"} = '';
+				$EventVar{"pid"} = '';
+				
+				$stats_add{'messages'}->{'received'}->{'size'}->{'message'} = length $EventVar{'msg'};
+				$stats_add{'messages'}->{'received'}->{'count-by-type'}->{'kmsg'} = 1;
+				addstats(%stats_add);
+			}
+			elsif(/^<(?'priority'\d{1,3})>\s*(?'datetime'(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ ]?0*([12]?[0-9]|3[01]) 0*(1?[0-9]|2[0-3])(:0*([1-5]?[0-9])){2})\s+(?'tag'\S+) / ||
 			   /^<(?'priority'\d{1,3})>\s*(?'tag'\S+) /)
 			{
 				$EventVar{"msg"} = $';
@@ -795,7 +823,7 @@ sub logwall
 					},
 				});
 			}
-			elsif($PeerVar{"sourcenick"} ne "")
+			elsif($sourcetype eq "fifo")
 			{
 				# Treat this line is a raw log message written to a Fifo.
 				$EventVar{"msg"} = $_;
@@ -809,7 +837,8 @@ sub logwall
 				addstats({
 					'messages' => {
 						'received' => {
-							'fifo' => {$PeerVar{"sourcenick"} => 1,},
+							'count-by-type' => {'fifo' => 1,},
+							'fifo' => {{$PeerVar{"sourcenick"} => 1,},
 							'size' => {'message' => length $EventVar{'msg'},},
 						},
 					},
