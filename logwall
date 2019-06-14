@@ -183,7 +183,7 @@ sub selflog
 	my $backend = shift;
 	my $str = mklogline($facnum{'syslog'}, $_[0], strftime("%b %e %H:%M:%S", localtime), "logwall[$$]:", $_[1]);
 	print STDERR $str if !$quiet;
-	my $printerr = print {$backend} $str;
+	my $printOK = print {$backend} $str;
 	
 	addstats({
 		'messages' => {
@@ -195,11 +195,11 @@ sub selflog
 					'total' => length $str,
 					'message' => length $_[1],
 					'failed' => {
-						'total' => ($printError ? 0 : length $str),
-						'message' => ($printError ? 0 : length $_[1]),
+						'total' => ($printOK ? 0 : length $str),
+						'message' => ($printOK ? 0 : length $_[1]),
 					},
 				},
-				'error' => ($printerr ? 0 : 1),
+				'error' => ($printOK ? 0 : 1),
 			},
 		},
 	});
@@ -627,7 +627,12 @@ sub process_rules_and_send_log
 		# Compose output log message.
 		my $raw = mklogline($EventVarRef->{'facility'}, $EventVarRef->{'severity'}, $EventVarRef->{'datetime'}, $EventVarRef->{'tag'}, $EventVarRef->{'msg'});
 		# Send to syslog daemon.
-		my $printError = print {$backend} $raw;
+		my $printOK = print {$backend} $raw;
+		my %errorcode;
+		if(!$printOK)
+		{
+			$errorcode{int $!} = 1;
+		}
 		
 		addstats({
 			'messages' => {
@@ -639,11 +644,12 @@ sub process_rules_and_send_log
 						'total' => length $raw,
 						'message' => length $EventVarRef->{'msg'},
 						'failed' => {
-							'total' => ($printError ? 0 : length $raw),
-							'message' => ($printError ? 0 : length $EventVarRef->{'msg'}),
+							'total' => ($printOK ? 0 : length $raw),
+							'message' => ($printOK ? 0 : length $EventVarRef->{'msg'}),
 						},
 					},
-					'error' => ($printError ? 0 : 1),
+					'error' => ($printOK ? 0 : 1),
+					'errorcode' => \%errorcode,
 				},
 			},
 		});
