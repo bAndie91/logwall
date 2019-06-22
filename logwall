@@ -780,7 +780,7 @@ sub logwall
 			if($sourcetype eq "kmsg")
 			{
 				my %stats_add;
-				if(/^<(?'severity'\d)>/)
+				if(/^<(?'severity'\d)>/)  # FIXME its actually a syslog priority
 				{
 					$EventVar{"msg"} = $';
 					$EventVar{"severity"} = $+{'severity'};
