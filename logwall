@@ -125,17 +125,34 @@ sub addstats
 	close $fh;
 }
 
+sub usleep
+{
+	select undef, undef, undef, $_[0];
+}
+
 sub robust_write
 {
-	my ($fd, $data) = @_;
+	my ($dst, $data) = @_;
 	while(1)
 	{
-		my $ok = print {$fd} $data;
+		my $ok = print {$dst->{'fhandle'}} $data;
 		if(!$ok)
 		{
-			if($!{'ECONNREFUSED'} or $!{'EAGAIN'} or $!{'EWOULDBLOCK'} or $!{'ENOTCONN'})
+			# TODO: update stats with temp_error count
+			
+			if($!{'ECONNREFUSED'} or $!{'EAGAIN'} or $!{'EWOULDBLOCK'})
 			{
 				# Try again, hope it's recovered ASAP.
+				usleep 0.2;
+				next;
+			}
+			elsif($!{'ENOTCONN'})
+			{
+				if(exists $dst->{'open'})
+				{
+					if($dst->{'open'}->($dst)) { next; }
+				}
+				usleep 0.2;
 				next;
 			}
 		}
@@ -677,7 +694,7 @@ sub process_rules_and_send_log
 sub logwall
 {
 	my $client = shift;
-	my $backend;
+	my $backend = {};
 	my $rules;
 	my $stream_rules;
 	my %PeerVar;
@@ -733,17 +750,23 @@ sub logwall
 	# else: fifonick process title has been set earlier
 
 
-	if(!socket($backend, AF_UNIX, SOCK_DGRAM, 0))
+	if(!socket($backend->{'fhandle'}, AF_UNIX, SOCK_DGRAM, 0))
 	{
 		selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend is undefined here
 		return 0;
 	}
-	if(!connect($backend, $sock_connect_addr))
+	sub backend_connect
 	{
-		selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend is undefined here
-		return 0;
+		if(!connect($_[0]->{'fhandle'}, $sock_connect_addr))
+		{
+			selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend maybe undefined here
+			return 0;
+		}
+		return 1;
 	}
-	select $backend;
+	$backend->{'open'} = \&backend_connect;
+	backend_connect($backend);
+	select $backend->{'fhandle'};
 	$|++;
 	select STDOUT;
 	
@@ -855,7 +878,7 @@ sub logwall
 		}
 	}
 	
-	shutdown $backend, 2;
+	shutdown $backend->{'fhandle'}, 2;
 	close $rules;
 }
 
@@ -957,9 +980,9 @@ for my $fifospec (@fifo_listeners)
 
 $str = "Backend: $sock_connect: ";
 print STDERR $str if !$quiet;
-socket($backend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
-connect($backend, $sock_connect_addr) or early_die $str;
-close $backend;
+socket($backend_fh, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
+connect($backend_fh, $sock_connect_addr) or early_die $str;
+close $backend_fh;
 print STDERR "Tested\n" if !$quiet;
 
 $str = "Frontend: $sock_listen: ";
