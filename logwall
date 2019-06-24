@@ -125,6 +125,41 @@ sub addstats
 	close $fh;
 }
 
+sub usleep
+{
+	select undef, undef, undef, $_[0];
+}
+
+sub robust_write
+{
+	my ($dst, $data) = @_;
+	while(1)
+	{
+		my $ok = print {$dst->{'fhandle'}} $data;
+		if(!$ok)
+		{
+			# TODO: update stats with temp_error count
+			
+			if($!{'ECONNREFUSED'} or $!{'EAGAIN'} or $!{'EWOULDBLOCK'})
+			{
+				# Try again, hope it's recovered ASAP.
+				usleep 0.2;
+				next;
+			}
+			elsif($!{'ENOTCONN'})
+			{
+				if(exists $dst->{'open'})
+				{
+					if($dst->{'open'}->($dst)) { next; }
+				}
+				usleep 0.2;
+				next;
+			}
+		}
+		return $ok;
+	}
+}
+
 sub replace_regexp
 {
 	my $repl;
@@ -183,7 +218,7 @@ sub selflog
 	my $backend = shift;
 	my $str = mklogline($facnum{'syslog'}, $_[0], strftime("%b %e %H:%M:%S", localtime), "logwall[$$]:", $_[1]);
 	print STDERR $str if !$quiet;
-	my $printerr = print {$backend} $str;
+	my $printOK = robust_write $backend, $str;
 	
 	addstats({
 		'messages' => {
@@ -194,8 +229,12 @@ sub selflog
 				'size' => {
 					'total' => length $str,
 					'message' => length $_[1],
+					'failed' => {
+						'total' => ($printOK ? 0 : length $str),
+						'message' => ($printOK ? 0 : length $_[1]),
+					},
 				},
-				'error' => ($printerr == 0 ? 1 : 0),
+				'error' => ($printOK ? 0 : 1),
 			},
 		},
 	});
@@ -205,14 +244,14 @@ sub mklogline
 {
 	my ($facility, $severity, $datetime, $tag, $msg) = @_;
 	my $priority = ($facility << 3) + $severity;
-	return sprintf "<$priority>%s %s%s\x00", $datetime, defined $tag ? "$tag " : "", $msg;
+	return sprintf "<$priority>%s %s%s\x00", $datetime, defined $tag ? "$tag " : '', $msg;
 }
 
 sub peerdata
 {
-	my $exe = "";
-	my $argstr = "";
-	my $comm = "";
+	my $exe = '';
+	my $argstr = '';
+	my $comm = '';
 	my @args;
 	my ($realpid, $proc_uid, $proc_gid) = unpack('lll', getsockopt($_[0], SOL_SOCKET, SO_PEERCRED));
 	
@@ -602,7 +641,7 @@ sub process_rules
 		apply_rewrites($EventVarRef, \%RuleVar);
 		
 		RULE_DID_NOT_MATCH:
-		# Don't put back rewritten attributes to $EventVarRef; let %RuleVar overwritten by $EventVarRef next cycle.
+		# Don't put back rewritten attributes to $EventVarRef; let %RuleVar be overwritten by $EventVarRef next cycle.
 		
 		last RULES if defined $pass;
 	}
@@ -623,7 +662,12 @@ sub process_rules_and_send_log
 		# Compose output log message.
 		my $raw = mklogline($EventVarRef->{'facility'}, $EventVarRef->{'severity'}, $EventVarRef->{'datetime'}, $EventVarRef->{'tag'}, $EventVarRef->{'msg'});
 		# Send to syslog daemon.
-		my $printError = print {$backend} $raw;
+		my $printOK = robust_write $backend, $raw;
+		my %errorcode;
+		if(!$printOK)
+		{
+			$errorcode{int $!} = 1;
+		}
 		
 		addstats({
 			'messages' => {
@@ -634,8 +678,13 @@ sub process_rules_and_send_log
 					'size' => {
 						'total' => length $raw,
 						'message' => length $EventVarRef->{'msg'},
+						'failed' => {
+							'total' => ($printOK ? 0 : length $raw),
+							'message' => ($printOK ? 0 : length $EventVarRef->{'msg'}),
+						},
 					},
-					'error' => ($printError == 0 ? 1 : 0),
+					'error' => ($printOK ? 0 : 1),
+					'errorcode' => \%errorcode,
 				},
 			},
 		});
@@ -645,7 +694,7 @@ sub process_rules_and_send_log
 sub logwall
 {
 	my $client = shift;
-	my $backend;
+	my $backend = {};
 	my $rules;
 	my $stream_rules;
 	my %PeerVar;
@@ -665,7 +714,7 @@ sub logwall
 	}
 	else
 	{
-		$PeerVar{"fifonick"} = "";
+		$PeerVar{"fifonick"} = '';
 	}
 	
 	addstats({'forks' => {'count' => 1,},});
@@ -701,17 +750,23 @@ sub logwall
 	# else: fifonick process title has been set earlier
 
 
-	if(!socket($backend, AF_UNIX, SOCK_DGRAM, 0))
+	if(!socket($backend->{'fhandle'}, AF_UNIX, SOCK_DGRAM, 0))
 	{
 		selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend is undefined here
 		return 0;
 	}
-	if(!connect($backend, $sock_connect_addr))
+	sub backend_connect
 	{
-		selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend is undefined here
-		return 0;
+		if(!connect($_[0]->{'fhandle'}, $sock_connect_addr))
+		{
+			selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend maybe undefined here
+			return 0;
+		}
+		return 1;
 	}
-	select $backend;
+	$backend->{'open'} = \&backend_connect;
+	backend_connect($backend);
+	select $backend->{'fhandle'};
 	$|++;
 	select STDOUT;
 	
@@ -735,7 +790,7 @@ sub logwall
 		local $/;
 		if(not defined $PeerVar{"terminator"})
 		{
-			if($PeerVar{"fifonick"} ne "") { $PeerVar{"terminator"} = "\n"; }
+			if($PeerVar{"fifonick"} ne '') { $PeerVar{"terminator"} = "\n"; }
 			else { $PeerVar{"terminator"} = "\x00"; }
 		}
 		$/ = $PeerVar{"terminator"};
@@ -778,7 +833,7 @@ sub logwall
 					},
 				});
 			}
-			elsif($PeerVar{"fifonick"} ne "")
+			elsif($PeerVar{"fifonick"} ne '')
 			{
 				# Treat this line is a raw log message written to a Fifo.
 				$EventVar{"msg"} = $_;
@@ -800,6 +855,7 @@ sub logwall
 			}
 			else
 			{
+				# Can not parse message format.
 				addstats({
 					'messages' => {
 						'received' => {
@@ -816,13 +872,13 @@ sub logwall
 			
 			$EventVar{"facility_name"} = $facnam[$EventVar{"facility"}];
 			$EventVar{"severity_name"} = $sevnam[$EventVar{"severity"}];
-			$EventVar{"tee"} = "";
+			$EventVar{"tee"} = '';
 			
 			process_rules_and_send_log($backend, $rules, $rules_file, \%EventVar);
 		}
 	}
 	
-	shutdown $backend, 2;
+	shutdown $backend->{'fhandle'}, 2;
 	close $rules;
 }
 
@@ -924,9 +980,9 @@ for my $fifospec (@fifo_listeners)
 
 $str = "Backend: $sock_connect: ";
 print STDERR $str if !$quiet;
-socket($backend, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
-connect($backend, $sock_connect_addr) or early_die $str;
-close $backend;
+socket($backend_fh, AF_UNIX, SOCK_DGRAM, 0) or early_die $str;
+connect($backend_fh, $sock_connect_addr) or early_die $str;
+close $backend_fh;
 print STDERR "Tested\n" if !$quiet;
 
 $str = "Frontend: $sock_listen: ";
