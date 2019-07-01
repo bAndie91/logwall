@@ -136,8 +136,10 @@ sub robust_write
 	while(1)
 	{
 		my $ok = print {$dst->{'fhandle'}} $data;
+		my $errno = 0;
 		if(!$ok)
 		{
+			$errno = int $!;
 			# TODO: update stats with temp_error count
 			
 			if($!{'ECONNREFUSED'} or $!{'EAGAIN'} or $!{'EWOULDBLOCK'})
@@ -156,7 +158,7 @@ sub robust_write
 				next;
 			}
 		}
-		return $ok;
+		return ($ok, $errno);
 	}
 }
 
@@ -218,7 +220,7 @@ sub selflog
 	my $backend = shift;
 	my $str = mklogline($facnum{'syslog'}, $_[0], strftime("%b %e %H:%M:%S", localtime), "logwall[$$]:", $_[1]);
 	print STDERR $str if !$quiet;
-	my $printOK = robust_write $backend, $str;
+	my ($printOK, undef) = robust_write $backend, $str;
 	
 	addstats({
 		'messages' => {
@@ -662,11 +664,11 @@ sub process_rules_and_send_log
 		# Compose output log message.
 		my $raw = mklogline($EventVarRef->{'facility'}, $EventVarRef->{'severity'}, $EventVarRef->{'datetime'}, $EventVarRef->{'tag'}, $EventVarRef->{'msg'});
 		# Send to syslog daemon.
-		my $printOK = robust_write $backend, $raw;
+		my ($printOK, $print_errno) = robust_write $backend, $raw;
 		my %errorcode;
 		if(!$printOK)
 		{
-			$errorcode{int $!} = 1;
+			$errorcode{$print_errno} = 1;
 		}
 		
 		addstats({
@@ -752,20 +754,20 @@ sub logwall
 
 	if(!socket($backend->{'fhandle'}, AF_UNIX, SOCK_DGRAM, 0))
 	{
-		selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend is undefined here
+		selflog $backend, $sevnum{'crit'}, "backend socket open: $!";  # FIXME: $backend is undefined here
 		return 0;
 	}
 	sub backend_connect
 	{
 		if(!connect($_[0]->{'fhandle'}, $sock_connect_addr))
 		{
-			selflog $backend, $sevnum{'crit'}, $!;  # FIXME: $backend maybe undefined here
+			selflog $backend, $sevnum{'crit'}, "backend socket connect: $!";  # FIXME: $backend maybe undefined here
 			return 0;
 		}
 		return 1;
 	}
-	$backend->{'open'} = \&backend_connect;
 	backend_connect($backend);
+	$backend->{'open'} = \&backend_connect;
 	select $backend->{'fhandle'};
 	$|++;
 	select STDOUT;
