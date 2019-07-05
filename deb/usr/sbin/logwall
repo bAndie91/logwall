@@ -779,25 +779,37 @@ sub logwall
 	# else: fifonick process title has been set earlier
 
 
-	if(!socket($backend->{'fhandle'}, AF_UNIX, SOCK_DGRAM, 0))
-	{
-		selflog $backend, $sevnum{'crit'}, "backend socket open: $!";  # FIXME: $backend->{fhandle} is undefined here
-		return 0;
-	}
 	sub backend_reconnect
 	{
-		close($_[0]->{'fhandle'});
-		if(!connect($_[0]->{'fhandle'}, $sock_connect_addr))
+		if(exists $_[0]->{'fhandle'})
 		{
-			selflog $backend, $sevnum{'crit'}, "backend socket connect: $!";  # FIXME: $backend->{fhandle} maybe undefined here
+			close $_[0]->{'fhandle'} or 1;
+		}
+		$! = 0;
+		if(!socket($_[0]->{'fhandle'}, AF_UNIX, SOCK_DGRAM, 0))
+		{
+			selflog $backend, $sevnum{'crit'}, "backend socket open: $!";  # FIXME: $backend->{fhandle} is undefined here
 			return 0;
 		}
+		while(1)
+		{
+			if(connect($_[0]->{'fhandle'}, $sock_connect_addr)) { last; }
+			else
+			{
+				if($!{'ENOENT'})
+				{
+					next;
+				}
+				selflog $backend, $sevnum{'crit'}, "backend socket connect: $!";  # FIXME: $backend->{fhandle} maybe undefined here
+				return 0;
+			}
+		}
 		my $selection = select $_[0]->{'fhandle'};
-		$|++;
+		$| = 1;
 		select $selection;
 		return 1;
 	}
-	backend_reconnect($backend);
+	backend_reconnect($backend);  # TODO: check return code
 	$backend->{'reconnect'} = \&backend_reconnect;
 	
 	
