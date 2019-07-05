@@ -1,0 +1,13 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+. /usr/lib/yazzy-utils/bash-utils
+
+perl -c deb/usr/sbin/logwall
+
+VERSION=`git describe --tags`
+cat control.tmpl | template > deb/DEBIAN/control
+
+mkdeb

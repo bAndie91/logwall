@@ -1,0 +1,51 @@
+logwall (0.2.2) unstable; urgency=medium
+
+  * add Tee feature
+  * config parser bugfix
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Mon, 25 Sep 2017 15:27:41 +0200
+
+logwall (0.2.1) unstable; urgency=low
+
+  * add Fifo Listener feature
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Sun, 17 Sep 2017 17:07:52 +0200
+
+logwall (0.1.27) unstable; urgency=high
+
+  * change SysV SHM based statistics store to tmpfs + json file
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Sun, 10 Sep 2017 13:21:16 +0200
+
+logwall (0.1.25) unstable; urgency=low
+
+  * match to comm (eg. comm=~"cron.*")
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Sun, 30 Jul 2017 20:02:35 +0200
+
+logwall (0.1.23) unstable; urgency=medium
+
+  * accept aliases ({{ident}}, {{level}}) at log rewrite
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Sat, 21 Jan 2017 17:11:15 +0100
+
+logwall (0.1.20) unstable; urgency=high
+
+  * fix bug: shared filenadle for ruleset file (3nd attempt)
+  * configurable which attributes to write by internal log, rwlog
+  * new operator for regexp subs ":~"
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Sat, 10 Sep 2016 20:35:06 +0200
+
+logwall (0.1.19) unstable; urgency=high
+
+  * fix bug: shared filenadle for ruleset file (2nd attempt)
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Sat, 10 Sep 2016 11:28:55 +0200
+
+logwall (0.1.18) unstable; urgency=high
+
+  * fix bug: shared filenadle for ruleset file
+
+ -- Andreas Hrubak <andreas@uucp.hu>  Fri, 09 Sep 2016 08:06:12 +0200
+

@@ -1,0 +1,16 @@
+#
+# defaults file for logwall (syslog firewall)
+#
+
+if [ -z "$SUPERVISOR" ] && getent group syslog >/dev/null
+then
+  SUPERVISOR="sg syslog"
+  sg()
+  {
+    local group=$1
+    shift
+    command sg $group -c "$*"
+  }
+fi
+
+OPTIONS="-q -r /etc/logwall/rules -S /run/shm/logwall-stats.json -f fifo:root:root:0666:/var/log/fifo"

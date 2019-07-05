@@ -1,0 +1,4 @@
+#!/bin/sh
+
+insserv -d logwall
+echo "logwall: INSTALL: Don't forget to setup syslog daemon's listen socket." >&2

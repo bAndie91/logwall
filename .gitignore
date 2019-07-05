@@ -1,0 +1,4 @@
+/mkdeb-fakeroot.txt
+/*.deb
+/deb/DEBIAN/control
+/deb/DEBIAN/md5sums

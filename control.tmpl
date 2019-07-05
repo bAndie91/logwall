@@ -1,0 +1,13 @@
+Package: logwall
+Section: admin
+Priority: optional
+Maintainer: Andras Hrubak <andreas@uucp.hu>
+Version: %VERSION%
+Architecture: all
+Depends: system-log-daemon, perl, libipc-shareable-perl
+Description: logwall for syslog is an analogue to firewall for IP networks. 
+ Many distributors set /dev/log socket world-writable, this may cause enfaking the system logs on multiuser systems. 
+ One solution to set socket's permissions to 660 and sorting users and their processes into groups by which the
+ access to /dev/log is allowed or denied.
+ logwall gives more flexibility to control who may able to log, with which facility and at which priority with a ruleset 
+ based on peer socket properties.

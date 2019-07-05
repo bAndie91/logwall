@@ -1,0 +1,14 @@
+
+Setup system-log-daemon to properly co-operate with logwall.
+
+a. rsyslogd
+	
+	$SystemLogSocketName /dev/logwall
+
+b. syslog-ng
+
+	TODO
+		
+c. nx-log
+		
+	TODO
