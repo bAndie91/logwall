@@ -68,6 +68,8 @@ setlocale(LC_TIME, 'C');
 sub merge_deep
 {
 	my $ref2 = $_[1];
+	my $ignore_empty_keys = 0;
+	my $array_merge_method = {map{$_=>$_}qw/append patch override/}->{'patch'};
 	
 	if(ref $ref2 eq '')
 	{
@@ -82,7 +84,7 @@ sub merge_deep
 		}
 		for my $key (keys %$ref2)
 		{
-			if($key ne '')  # Ignore empty keys
+			if(not $ignore_empty_keys or $key ne '')
 			{
 				merge_deep($_[0]->{$key}, $ref2->{$key});
 			}
@@ -94,12 +96,24 @@ sub merge_deep
 		{
 			$_[0] = [];
 		}
-		# TODO
-		# should the target array be appended/patched/overwritten?
-		# now it's patched
-		for my $idx (0..$#$ref2)
+		
+		if($array_merge_method eq 'append')
 		{
-			merge_deep($_[0]->[$idx], $ref2->[$idx]);
+			for my $idx (0..$#$ref2)
+			{
+				push @{$_[0]}, $ref2->[$idx];
+			}
+		}
+		elsif($array_merge_method eq 'patch')
+		{
+			for my $idx (0..$#$ref2)
+			{
+				merge_deep($_[0]->[$idx], $ref2->[$idx]);
+			}
+		}
+		elsif($array_merge_method eq 'override')
+		{
+			@{$_[0]} = @$ref2;
 		}
 	}
 	else
@@ -136,23 +150,36 @@ sub robust_write
 	while(1)
 	{
 		my $ok = print {$dst->{'fhandle'}} $data;
-		my $errno = 0;
-		if(!$ok)
+		my $errno = int $!;
+		my %E = %!;
+		
+		if($ok)
 		{
-			$errno = int $!;
-			# TODO: update stats with temp_error count
+			$errno = 0;
+		}
+		else
+		{
+			addstats({
+				'system' => {
+					'write' => {
+						'error' => {
+							$errno => 1,
+						},
+					},
+				},
+			});
 			
-			if($!{'ECONNREFUSED'} or $!{'EAGAIN'} or $!{'EWOULDBLOCK'})
+			if($E{'EAGAIN'} or $E{'EWOULDBLOCK'})
 			{
 				# Try again, hope it's recovered ASAP.
 				usleep 0.2;
 				next;
 			}
-			elsif($!{'ENOTCONN'})
+			elsif($E{'ECONNREFUSED'} or $E{'ENOTCONN'})
 			{
-				if(exists $dst->{'open'})
+				if(exists $dst->{'reconnect'})
 				{
-					if($dst->{'open'}->($dst)) { next; }
+					if($dst->{'reconnect'}->($dst)) { next; }
 				}
 				usleep 0.2;
 				next;
@@ -754,23 +781,24 @@ sub logwall
 
 	if(!socket($backend->{'fhandle'}, AF_UNIX, SOCK_DGRAM, 0))
 	{
-		selflog $backend, $sevnum{'crit'}, "backend socket open: $!";  # FIXME: $backend is undefined here
+		selflog $backend, $sevnum{'crit'}, "backend socket open: $!";  # FIXME: $backend->{fhandle} is undefined here
 		return 0;
 	}
-	sub backend_connect
+	sub backend_reconnect
 	{
+		close($_[0]->{'fhandle'});
 		if(!connect($_[0]->{'fhandle'}, $sock_connect_addr))
 		{
-			selflog $backend, $sevnum{'crit'}, "backend socket connect: $!";  # FIXME: $backend maybe undefined here
+			selflog $backend, $sevnum{'crit'}, "backend socket connect: $!";  # FIXME: $backend->{fhandle} maybe undefined here
 			return 0;
 		}
+		my $selection = select $_[0]->{'fhandle'};
+		$|++;
+		select $selection;
 		return 1;
 	}
-	backend_connect($backend);
-	$backend->{'open'} = \&backend_connect;
-	select $backend->{'fhandle'};
-	$|++;
-	select STDOUT;
+	backend_reconnect($backend);
+	$backend->{'reconnect'} = \&backend_reconnect;
 	
 	
 	if(!open $stream_rules, '<', $stream_rules_file)
