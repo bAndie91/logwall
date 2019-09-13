@@ -130,31 +130,36 @@ sub merge_deep
 
 sub addstats
 {
-	# checks time elapsed since last write and 
+	# checks time elapsed since last write and
 	# if it was a time long enough, then
 	# adds given stats (in a hash) to the stats file
 	# merging the colliding keys and flushes;
-	# otherwise keep new stats in memory.
+	# otherwise keep new stats in memory for future use.
 	
 	merge_deep($stats_in_memory, $_[0]);
-	if(time > $stats_last_written + $stats_write_min_interval)
+	if(scalar keys $stats_in_memory > 0 and time > $stats_last_written + $stats_write_min_interval)
 	{
-		open my $fh, '+<', $stats_file;
-		flock $fh, LOCK_EX;
-		local $/ = undef;
-		my $stats;
-		eval {
-			$stats = decode_json(<$fh> || '{}');
-			1;
-		} or $stats = {};
-		seek $fh, 0, 0;
-		merge_deep($stats, $stats_in_memory);
-		print {$fh} encode_json($stats);
-		truncate $fh, tell $fh;
-		close $fh;
-		$stats_last_written = time;
-		$stats_in_memory = {};
+		addstats_write();
 	}
+}
+
+sub addstats_write
+{
+	open my $fh, '+<', $stats_file;
+	flock $fh, LOCK_EX;
+	local $/ = undef;
+	my $stats;
+	eval {
+		$stats = decode_json(<$fh> || '{}');
+		1;
+	} or $stats = {};
+	seek $fh, 0, 0;
+	merge_deep($stats, $stats_in_memory);
+	print {$fh} encode_json($stats);
+	truncate $fh, tell $fh;
+	close $fh;
+	$stats_last_written = time;
+	$stats_in_memory = {};
 }
 
 sub waitread
@@ -957,6 +962,9 @@ sub logwall_worker
 		}
 	}
 	
+	# lastly, flush remained stats
+	addstats_write();
+	
 	shutdown $backend->{'fhandle'}, 2;
 	close $rules;
 }
@@ -1157,5 +1165,3 @@ if($fork == 0)
 }
 
 print STDERR "logwall started, pid $fork\n" if !$quiet;
-
-# TODO: exit/signal flush stats
