@@ -30,7 +30,7 @@ $rules_file = "/etc/logwall/rules";
 $stream_rules_file = "/etc/logwall/stream-rules";
 $pid_file = "/var/run/logwall.pid";
 $stats_file = "/var/run/shm/logwall-stats.json";
-$stats_write_min_interval = 1;
+$stats_write_min_interval = 1.0;
 $stats_last_written = 0;
 $stats_in_memory = {};
 @fifo_listeners = ();
@@ -44,7 +44,7 @@ GetOptions(
     'stream-rules=s'=> \$stream_rules_file,
     'P|pidfile=s'   => \$pid_file,
     'S|statsfile=s' => \$stats_file,
-    'stats-write-min-interval=d' => \$stats_write_min_interval,
+    'stats-write-min-interval=f' => \$stats_write_min_interval,
     'f|fifo=s@'     => \@fifo_listeners,
     'q|quiet'       => \$quiet,
     'help'          => sub {
@@ -129,6 +129,12 @@ sub merge_deep
 
 sub addstats
 {
+	# checks time elapsed since last write and 
+	# if it was a time long enough, then
+	# adds given stats (in a hash) to the stats file
+	# merging the colliding keys and flushes;
+	# otherwise keep new stats in memory.
+	
 	merge_deep($stats_in_memory, $_[0]);
 	if(time > $stats_last_written + $stats_write_min_interval)
 	{
@@ -152,16 +158,25 @@ sub addstats
 
 sub waitread
 {
+	# read from given filehandle and pay attention on background jobs,
+	# such as flushing stats to stats file.
+	#
+	# because i dont want to do multithreading just to batch up stats,
+	# so i check batch flush timeouts here, as the process idles mostly 
+	# here while reading from socket.
+	
 	my $fh = shift;
 	while(1)
 	{
-		my $readers ;
-		select $readers, undef, undef, $stats_write_min_interval;
-		if($readers ... $fh)
+		addstats({});
+		
+		my $readers = '';
+		vec($readers, fileno($fh), 1) = 1;
+		my $available = select $readers, undef, undef, $stats_write_min_interval;
+		if($available)
 		{
 			return <$fh>;
 		}
-		addstats({});
 	}
 }
 
