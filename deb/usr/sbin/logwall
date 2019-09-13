@@ -8,6 +8,7 @@ use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID
 use JSON;
 use Fcntl ':flock';
 use Cwd;
+use Time::HiRes 'time', 'sleep';
 
 
 @facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
@@ -180,11 +181,6 @@ sub waitread
 	}
 }
 
-sub usleep
-{
-	select undef, undef, undef, $_[0];
-}
-
 sub robust_write
 {
 	my ($dst, $data) = @_;
@@ -213,7 +209,7 @@ sub robust_write
 			if($E{'EAGAIN'} or $E{'EWOULDBLOCK'})
 			{
 				# Try again, hope it's recovered ASAP.
-				usleep 0.2;
+				sleep 0.2;
 				next;
 			}
 			elsif($E{'ECONNREFUSED'} or $E{'ENOTCONN'})
@@ -222,7 +218,7 @@ sub robust_write
 				{
 					if($dst->{'reconnect'}->($dst)) { next; }
 				}
-				usleep 0.2;
+				sleep 0.2;
 				next;
 			}
 		}
