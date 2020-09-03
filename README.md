@@ -8,3 +8,6 @@ by which it's allowed or denied to access /dev/log for write.
 logwall gives more flexibility to control who be able to log 
 in which facility and at which priority 
 with a ruleset based on peer socket properties.
+
+# issues
+Please submit issues via PR to some file `issue/TITLE.txt`.
