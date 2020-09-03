@@ -1,0 +1,9 @@
+support rules which operate on stream-level instead of log event level.
+eg.
+```
+comm==grafana terminator=\n
+```
+
+---
+
+solved by eb930f5
