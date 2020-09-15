@@ -1,4 +1,0 @@
-new action keyword:
-`include=user.rules` – jump rule processing onto user.rules file in the same folder as the current file is
-`include=/var/run/dynamic.logwall` – absolute path
-

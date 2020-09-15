@@ -1,2 +1,0 @@
-as of  version 0.2.3, rewrite instructions get applied  at the end of the whole rule evaluation, not after each rule involving rewrite.
-this may be rethought, because it's can be misleading that you say `ident==foo ident:=bar` and then again match to `ident`... which string to match to? "foo" or "bar"?

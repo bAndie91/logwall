@@ -1,9 +1,0 @@
-examples
-```
-datetime+=1h
-datetime-=1h30m
-datetime<1970-01-01
-datetime>now
-datetime>now-1h
-datetime>"%Y-%m-01 00:00:00"
-```

@@ -10,4 +10,4 @@ in which facility and at which priority
 with a ruleset based on peer socket properties.
 
 # issues
-Please submit issues via PR to some file `issue/TITLE.txt`.
+Please submit issues via PR to some file `<TITLE>.txt` or `<TITLE>.md` on `issues` branch.
