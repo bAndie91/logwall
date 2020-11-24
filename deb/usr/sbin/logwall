@@ -403,6 +403,31 @@ sub apply_rewrites
 	$VarRef->{'pid'} = pid_from_tag($VarRef->{'tag'});
 }
 
+sub string_match
+{
+	my $given_val = shift;
+	my $test_val = shift;
+	my $base_op = shift;
+	my $positive = shift;
+	my $case_sensitive = shift;
+	
+	my $match = 0;
+	if(not $case_sensitive)
+	{
+		$given_val = lc $given_val;
+		$test_val = lc $test_val;
+	}
+	
+	if   ($base_op eq '==') { $match = 1 if $given_val eq $test_val; }
+	elsif($base_op eq '=~') { $match = 1 if $given_val =~ $test_val; }
+	elsif($base_op eq '=^') { $match = 1 if index($given_val, $test_val) == 0; }
+	elsif($base_op eq '=$') { $match = 1 if index($given_val, $test_val) == length($given_val)-length($test_val); }
+	elsif($base_op eq '=%') { $match = 1 if index($given_val, $test_val) >= 0; }
+	
+	$match = ! $match if not $positive;
+	return $match;
+}
+
 sub process_rules
 {
 	my $backend = shift;
@@ -427,7 +452,7 @@ sub process_rules
 		TESTS:
 		while(1)
 		{
-			if($rule_line_rest =~ /^\s*([a-z_]+)(==|!=|=~|=\*|=|!~|!\*|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
+			if($rule_line_rest =~ /^\s*([a-z_]+)((?:(?:!)?(?:==|=~|=\^|=\$|=\%)(?:\*)?)|=|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
 			{
 				$rule_line_rest = $';
 				my ($test, $op, $value) = ($1, $2, $3);
@@ -512,12 +537,25 @@ sub process_rules
 				if($test =~ /^(exe|proc_owner|proc_group|exe_owner|exe_group|tag|sourcename|msg|comm|args|fifonick|tee)$/ and !$evaled_testexpr)
 				{
 					$evaled_testexpr = 1;
-					if($op eq '==')    { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} eq $value; }
-					elsif($op eq '!=') { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} ne $value; }
-					elsif($op eq '=~') { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} =~ /$value/; }
-					elsif($op eq '=*') { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} =~ /$value/i; }
-					elsif($op eq '!~') { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} !~ /$value/; }
-					elsif($op eq '!*') { goto RULE_DID_NOT_MATCH unless $RuleVar{$test} !~ /$value/i; }
+					
+					my $positive = 1;
+					my $case_sensitive = 1;
+					my $base_op = $op;
+					if(substr($base_op, 0, 1) == '!')
+					{
+						$positive = 0;
+						$base_op = substr $base_op, 1;
+					}
+					if(substr($base_op, -1) == '*')
+					{
+						$case_sensitive = 0;
+						$base_op = substr $base_op, 0, -1;
+					}
+					
+					if($base_op ~~ ['==', '=~', '=^', '=$', '=%'])
+					{
+						goto RULE_DID_NOT_MATCH unless string_match($RuleVar{$test}, $value, $base_op, $positive, $case_sensitive);
+					}
 					elsif($op ~~ [':=', '^=', '+=', ':~'])
 					{
 						if($test =~ /^(tag|sourcename|msg)$/)
@@ -627,7 +665,7 @@ sub process_rules
 						}
 					}
 					
-					if($op =~ /^(==|!=|>=|<=|>|<)$/)
+					if($op =~ /^(==|!==|>=|<=|>|<)$/)
 					{
 						$evaled_testexpr = 1;
 						my $testint = int $RuleVar{$test};

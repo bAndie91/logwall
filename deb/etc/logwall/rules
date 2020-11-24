@@ -73,19 +73,32 @@
 ##     it never clones a message which has been already cloned with the same "tee ID".
 ##
 ## Operators:
-##   Numeric and string operators:
-##     ==  equal
-##     !=  not equal
+##   Most operators look like the ones in Perl, but intentionally different to do not expect exact perl-like behaviur.
+##
 ##   Numeric operators:
+##     ==  equal
+##     !== not equal
 ##     <   less
 ##     >   greater
 ##     <=  less or equal
 ##     >=  greater or equal
 ##   String operators:
-##     =~  regexp match
-##     !~  negative regexp match
-##     =*  case insensitive regexp match
-##     !*  negative case insensitive regexp match
+##     ==   equal
+##     =~   regexp match
+##     =^   starts with
+##     =$   ends with
+##     =%   contains
+##     all string comparasions can be negated by prepending '!' to the operator
+##     all string comparasions are case sensitive by default, make them case insensitive by appending '*' to the operator
+##
+##                   | case sensitive | negated | case insensitive | case insensitive and negated |
+##                   |----------------|---------|------------------|------------------------------|
+##     equal         | ==             | !==     | ==*              | !==*                         |
+##     regexp match  | =~             | !=~     | =~*              | !=~*                         |
+##     starts with   | =^             | !=^     | =^*              | !=^*                         |
+##     ends with     | =$             | !=$     | =$*              | !=$*                         |
+##     contains      | =%             | !=%     | =%*              | !=%*                         |
+##
 ##   Rewrite operators
 ##     :=  overwrite
 ##     ^=  prepend
@@ -148,9 +161,9 @@
 ##     msg:~(?i)error~ERROR
 ##   Use hex char notation to match tilde literally, eg:
 ##     msg:~\x7E~tilde
-##   Substitution is global by default, be tricky if you need, eg:
+##   Substitutions have the global modifier (/g) by default, be tricky if you need, eg:
 ##     msg:~(?i)error(.*)~ERROR$1
-##   Regexp variables usable in replacement string are limited to:
+##   Perl-like regexp variables usable in replacement string are limited to:
 ##     $1 .. $9, $+, $`, $&, and $'
 ##
 ## Internal logging for debugging
@@ -167,10 +180,10 @@
 ##     sourcename==test  msg^="test: "  log=debug,ALL,proc_owner,proc_group,exe
 ##
 ## Examples:
-##   proc_owner!=root action=drop
+##   proc_owner!==root action=drop
 ##   severity>crit action=accept
 ##   severity<=crit proc_uid>=1000 log=info action=drop
-##   tag=~^/USR/SBIN/CRON sourcename:=CRON log=debug
+##   tag=^/USR/SBIN/CRON sourcename:=CRON log=debug
 ##
 ## Fifo name specification
 ##
@@ -192,14 +205,14 @@
 
 ### Rewrites ###
 
-tag=*cron sourcename:=cron
+tag=~*cron sourcename:=cron
 sourcename==cupsd proc_owner==root facility==user facility:=lpr
-tag=~^/etc/mysql/debian-start sourcename:=mysqld-debian
-tag=~^/etc/init.d/mysql sourcename:=mysqld-debian
-sourcename==apcupsd msg=~"Power failure" severity:=crit
+tag=^/etc/mysql/debian-start sourcename:=mysqld-debian
+tag=^/etc/init.d/mysql sourcename:=mysqld-debian
+sourcename==apcupsd msg=%"Power failure" severity:=crit
 
 # enforce "fifo-" prefox for messages arrived on fifo
-fifonick!="" tag:=fifo-{{fifonick}}
+fifonick!=="" tag:=fifo-{{fifonick}}
 
 # log all logs
 #log=debug
@@ -208,7 +221,7 @@ fifonick!="" tag:=fifo-{{fifonick}}
 ### Filters ###
 
 # most system processes
-proc_uid!=-1 proc_uid<1000 action=accept
+proc_uid!==-1 proc_uid<1000 action=accept
 
 # trusted programms
 exe==/sbin/unix_chkpwd action=accept
@@ -224,7 +237,7 @@ proc_owner=="" severity<error log="info;Unknown process owner: " action=drop
 
 # allow only these for everyone else
 facility==user action=accept
-facility>=local1 facility!=local3 facility<=local7 action=accept
+facility>=local1 facility!==local3 facility<=local7 action=accept
 
 # drop policy
 log="notice,ALL,msg;Drop by policy: " action=drop
