@@ -599,7 +599,7 @@ sub process_rules
 				{
 					if($value !~ /^-?\d+$/)
 					{
-						if($test =~ /^(?:proc_)?([ug])id$/)
+						if($test =~ /^(?:proc_|exe_)([ug])id$/)
 						{
 							my $ent;
 							if($1 eq 'u') { $ent = getpwnam $value; }
