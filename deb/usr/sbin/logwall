@@ -530,7 +530,7 @@ sub process_rules
 								replace_templates(\$repl, \%RuleVar, sub {
 									my ($prestr, $tmplvar) = @_;
 									$prestr =~ s/\\+$/$&$&/;  # escape backslashes directly preceeding a template variable
-									$tmplvar =~ s/[\$\\]/\\$&/g;  # escape dollar and backslashe chars in resolved variable to prevent expanding them as dollar-meta-chars
+									$tmplvar =~ s/[\$\\]/\\$&/g;  # escape dollar and backslash chars in resolved variable to prevent expanding them as dollar-meta-chars
 									return $prestr.$tmplvar;
 								});
 								my $newvalue = $RuleVar{$test};
@@ -599,7 +599,7 @@ sub process_rules
 				{
 					if($value !~ /^-?\d+$/)
 					{
-						if($test =~ /^p?([ug])id$/)
+						if($test =~ /^(?:proc_)?([ug])id$/)
 						{
 							my $ent;
 							if($1 eq 'u') { $ent = getpwnam $value; }
@@ -698,7 +698,7 @@ sub process_rules
 		    else
 		    {
 				$rule_line_rest =~ s/\s*$//;
-				$rule_line_rest =~ s/\s*(\x23.*)?$//;  # strip comments
+				$rule_line_rest =~ s/\s*(\x23.*)?$//;  # strip comments, \x23 is hashmark
 				if(length $rule_line_rest)
 				{
 					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$rule_line_rest'";
