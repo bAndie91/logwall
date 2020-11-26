@@ -36,6 +36,7 @@ $stats_last_written = 0;
 $stats_in_memory = {};
 @fifo_listeners = ();
 $quiet = 0;
+$config_syntax_check_mode = 0;
 
 Getopt::Long::Configure(qw/no_ignore_case/);
 GetOptions(
@@ -48,6 +49,7 @@ GetOptions(
     'stats-write-min-interval=f' => \$stats_write_min_interval,
     'f|fifo=s@'     => \@fifo_listeners,
     'q|quiet'       => \$quiet,
+    't|configtest'  => \$config_syntax_check_mode,
     'help'          => sub {
     	print "Options:
  --listen, -l      Frontend socket to listen to syslog connections on ($sock_listen)
@@ -59,11 +61,12 @@ GetOptions(
  --stats-write-min-interval  Minimum amount of seconds to wait between flush stats file ($stats_write_min_interval)
  --fifo, -f        Fifo specifications to listen to raw log messages on
  --quiet, -q       Output less messages at start
+ --configtest, -t  Run normally but evaluate all test terms in all rules to test the configuration syntax
 ";
     	exit;
     },
 )
-or die("Usage: $0 [-q] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]\n");
+or die("Usage: $0 [-q] [-t] [-l <frontend socket>] [-c <backend socket>] [-f <fifo> [-f <fifo> ...]] [-r <rules file>] [-P <pid file>] [-S <stats file>]\n");
 
 
 
@@ -271,6 +274,7 @@ sub resolvealias
 	$a = "severity" if $a eq "level";
 	$a = "exe_$1" if $a =~ /^(owner|group|uid|gid)$/;
 	$a = "proc_$1" if $a =~ /^p(owner|group|uid|gid)$/;
+	$a = "action" if $a ~~ ['then', 'jump'];
 	return $a;
 }
 
@@ -448,6 +452,7 @@ sub process_rules
 	{
 		$nl++;
 		my %RuleVar = %$EventVarRef;
+		my $this_rule_match = undef;
 		
 		TESTS:
 		while(1)
@@ -455,9 +460,9 @@ sub process_rules
 			if($rule_line_rest =~ /^\s*([a-z_]+)((?:(?:!)?(?:==|=~|=\^|=\$|=\%)(?:\*)?)|=|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
 			{
 				$rule_line_rest = $';
-				my ($test, $op, $value) = ($1, $2, $3);
+				my ($test_original, $op, $value) = ($1, $2, $3);
 				$value = $1 if $value =~ /^"([^""]*)"$/;
-				$test = resolvealias(lc $test);
+				my $test = resolvealias(lc $test_original);
 				
 				# Convert string-represented facility/severity to facility/severity number
 				if($test ~~ ['facility', 'severity'] and $value !~ /^\d+$/)
@@ -474,12 +479,12 @@ sub process_rules
 				# Evaluate test expression
 				my $evaled_testexpr = 0;
 				
-				if($test ~~ ['then', 'jump', 'action'])
+				if($test eq 'action')
 				{
 					$value = lc $value;
-					if($value eq 'drop') { $pass = 0; goto RULE_MATCHED; }
-					elsif($value eq 'accept') { $pass = 1; goto RULE_MATCHED; }
-					else { selflog $backend, $sevnum{'err'}, "keyword '$test' takes 'drop' or 'accept' on line $nl"; }
+					if   ($value eq 'drop')   { $pass = 0 if not defined $pass; goto RULE_END; }
+					elsif($value eq 'accept') { $pass = 1 if not defined $pass; goto RULE_END; }
+					else { selflog $backend, $sevnum{'err'}, "keyword '$test_original' takes 'drop' or 'accept' on line $nl"; }
 				}
 				
 				if($test eq 'log' and !$evaled_testexpr)
@@ -554,7 +559,11 @@ sub process_rules
 					
 					if($base_op ~~ ['==', '=~', '=^', '=$', '=%'])
 					{
-						goto RULE_DID_NOT_MATCH unless string_match($RuleVar{$test}, $value, $base_op, $positive, $case_sensitive);
+						if(not string_match($RuleVar{$test}, $value, $base_op, $positive, $case_sensitive))
+						{
+							$this_rule_match = 0 unless defined $this_rule_match;
+							goto TEST_TERM_END;
+						}
 					}
 					elsif($op ~~ [':=', '^=', '+=', ':~'])
 					{
@@ -589,7 +598,7 @@ sub process_rules
 						}
 						else
 						{
-							selflog $backend, $sevnum{'warn'}, "attribute '$test' is not rewritable on line $nl";
+							selflog $backend, $sevnum{'warn'}, "attribute '$test_original' is not rewritable on line $nl";
 							$evaled_testexpr = 0;
 						}
 					}
@@ -626,8 +635,9 @@ sub process_rules
 					{
 						if($test ne 'tee')
 						{
-							selflog $backend, $sevnum{'err'}, "keyword '$test' takes string comparasion or rewrite operator, but '$op' was found on line $nl";
-							goto RULE_DID_NOT_MATCH;
+							selflog $backend, $sevnum{'err'}, "keyword '$test_original' takes string comparasion or rewrite operator, but '$op' was found on line $nl";
+							$this_rule_match = 0 unless defined $this_rule_match;
+							last TESTS;
 						}
 						$evaled_testexpr = 0;
 					}
@@ -650,18 +660,21 @@ sub process_rules
 							{
 								# Can not resolve user/group name.
 								# Force fail this rule.
-								goto RULE_DID_NOT_MATCH;
+								$this_rule_match = 0 unless defined $this_rule_match;
+								goto TEST_TERM_END;
 							}
 						}
 						elsif($test eq "tee")
 						{
-							selflog $backend, $sevnum{'err'}, "keyword '$test' with '$op' operator takes numeric right-value on line $nl";
-							goto RULE_DID_NOT_MATCH;
+							selflog $backend, $sevnum{'err'}, "keyword '$test_original' with '$op' operator takes numeric right-value on line $nl";
+							$this_rule_match = 0 unless defined $this_rule_match;
+							goto TEST_TERM_END;
 						}
 						else
 						{
-							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric right-value on line $nl";
-							goto RULE_DID_NOT_MATCH;
+							selflog $backend, $sevnum{'err'}, "keyword '$test_original' takes numeric right-value on line $nl";
+							$this_rule_match = 0 unless defined $this_rule_match;
+							goto TEST_TERM_END;
 						}
 					}
 					
@@ -669,7 +682,13 @@ sub process_rules
 					{
 						$evaled_testexpr = 1;
 						my $testint = int $RuleVar{$test};
-						goto RULE_DID_NOT_MATCH unless eval qq{$testint $op $value};
+						my $num_op = $op;
+						$num_op = '!=' if $num_op eq '!==';
+						if(not eval qq{$testint $num_op $value})
+						{
+							$this_rule_match = 0 unless defined $this_rule_match;
+							goto TEST_TERM_END;
+						}
 					}
 					elsif($op eq ':=')
 					{
@@ -688,7 +707,7 @@ sub process_rules
 						}
 						else
 						{
-							selflog $backend, $sevnum{'warn'}, "attribute '$test' is not rewritable on line $nl";
+							selflog $backend, $sevnum{'warn'}, "attribute '$test_original' is not rewritable on line $nl";
 						}
 						
 						if($evaled_testexpr)
@@ -704,9 +723,10 @@ sub process_rules
 						}
 						else
 						{
-							selflog $backend, $sevnum{'err'}, "keyword '$test' takes numeric relation or ':=' operator, but '$op' was found on line $nl";
+							selflog $backend, $sevnum{'err'}, "keyword '$test_original' takes numeric relation or ':=' operator, but '$op' was found on line $nl";
 						}
-						goto RULE_DID_NOT_MATCH;
+						$this_rule_match = 0 unless defined $this_rule_match;
+						goto TEST_TERM_END;
 					}
 				}
 				
@@ -721,15 +741,17 @@ sub process_rules
 					}
 					else
 					{
-						selflog $backend, $sevnum{'warn'}, "attribute '$test' takes ':=' operator, but '$op' was found on line $nl";
-						goto RULE_DID_NOT_MATCH;
+						selflog $backend, $sevnum{'warn'}, "attribute '$test_original' takes ':=' operator, but '$op' was found on line $nl";
+						$this_rule_match = 0 unless defined $this_rule_match;
+						goto TEST_TERM_END;
 					}
 				}
 				
 				if(!$evaled_testexpr)
 				{
-					selflog $backend, $sevnum{'err'}, "bareword '$test' in $rules_file on line $nl";
-					goto RULE_DID_NOT_MATCH;
+					selflog $backend, $sevnum{'err'}, "bareword '$test_original' in $rules_file on line $nl";
+					$this_rule_match = 0 unless defined $this_rule_match;
+					goto TEST_TERM_END;
 				}
 		    }
 		    
@@ -740,21 +762,45 @@ sub process_rules
 				if(length $rule_line_rest)
 				{
 					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$rule_line_rest'";
-					goto RULE_DID_NOT_MATCH;
+					$this_rule_match = 0 unless defined $this_rule_match;
+					last TESTS;
 				}
-				goto RULE_MATCHED;
+				
+				# match the rule if all test terms are matched in it:
+				$this_rule_match = 1 unless defined $this_rule_match;
+				goto TEST_TERM_END;
+			}
+			
+			TEST_TERM_END:
+			if(defined $this_rule_match)
+			{
+				if($config_syntax_check_mode) { # continue with test term evaluation, but do not change $this_rule_match
+				}
+				else { goto RULE_END; }
+			}
+			else { # continue with test term evaluation
 			}
 		}
 		
-		RULE_MATCHED:
-		apply_rewrites($EventVarRef, \%RuleVar);
+		RULE_END:
+		if($this_rule_match)
+		{
+			apply_rewrites($EventVarRef, \%RuleVar);
+		}
+		else { # Don't put back rewritten attributes to $EventVarRef; let %RuleVar be overwritten by $EventVarRef next cycle.
+		}
 		
-		RULE_DID_NOT_MATCH:
-		# Don't put back rewritten attributes to $EventVarRef; let %RuleVar be overwritten by $EventVarRef next cycle.
-		
-		last RULES if defined $pass;
+		if(defined $pass)
+		{
+			if($config_syntax_check_mode) { # continue evaluating all rules (but keep $pass as it is)
+			}
+			else { last RULES; }
+		}
 	}
 	
+	RULESET_END:
+	
+	# allow by default
 	$pass = 1 if not defined $pass;
 	return $pass;
 }
