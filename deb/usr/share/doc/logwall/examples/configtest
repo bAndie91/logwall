@@ -1,0 +1,35 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+waitfor()
+{
+	while ! "$@"
+	do
+		echo "waiting for $@" >&2
+		sleep 0.5
+	done
+}
+
+[ ! -e out.sock ] || rm out.sock
+[ ! -e log.sock ] || rm log.sock
+[ ! -e logwall.pid ] || rm logwall.pid
+[ ! -e log.fifo ] || rm log.fifo
+
+pids_to_kill=''
+trap 'kill $pids_to_kill' EXIT
+
+nc -v -U -u -l out.sock | tee out.txt &
+pid_nc=$!
+pids_to_kill="$pids_to_kill $pid_nc"
+waitfor [ -e out.sock ]
+
+logwall --listen log.sock --fifo ::::log.fifo --connect out.sock --pidfile logwall.pid --statsfile logwall.json --configtest --rules rules
+pid_logwall=`cat logwall.pid`
+pids_to_kill="$pids_to_kill $pid_logwall"
+
+waitfor [ -e log.fifo ]
+#logger --socket log.sock -- "logwall test message"
+echo "logwall test message" > log.fifo
+waitfor [ -s out.txt ]
