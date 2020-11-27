@@ -12,6 +12,12 @@ waitfor()
 	done
 }
 
+if [ ! -f "$1" ]
+then
+	echo "Usage: $0 <rules-file>" >&2
+	exit 1
+fi
+
 [ ! -e out.sock ] || rm out.sock
 [ ! -e log.sock ] || rm log.sock
 [ ! -e logwall.pid ] || rm logwall.pid
@@ -20,12 +26,12 @@ waitfor()
 pids_to_kill=''
 trap 'kill $pids_to_kill' EXIT
 
-nc -v -U -u -l out.sock | tee out.txt &
+nc -v -U -u -l out.sock > out.txt &
 pid_nc=$!
 pids_to_kill="$pids_to_kill $pid_nc"
 waitfor [ -e out.sock ]
 
-logwall --listen log.sock --fifo ::::log.fifo --connect out.sock --pidfile logwall.pid --statsfile logwall.json --configtest --rules rules
+logwall --listen log.sock --fifo ::::log.fifo --connect out.sock --pidfile logwall.pid --statsfile logwall.json --configtest --rules "$1"
 pid_logwall=`cat logwall.pid`
 pids_to_kill="$pids_to_kill $pid_logwall"
 
@@ -33,3 +39,5 @@ waitfor [ -e log.fifo ]
 #logger --socket log.sock -- "logwall test message"
 echo "logwall test message" > log.fifo
 waitfor [ -s out.txt ]
+
+cat out.txt | tr "\0" "\n"
