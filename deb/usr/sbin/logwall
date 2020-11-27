@@ -457,10 +457,11 @@ sub process_rules
 	local $/ = "\n";
 
 	RULES:
-	while(my $rule_line_rest = <$rules>)
+	while(my $rule_line = <$rules>)
 	{
 		$nl++;
 		my %RuleVar = %$EventVarRef;
+		my $rule_line_rest = $rule_line;
 		my $this_rule_match = undef;
 		
 		TESTS:
