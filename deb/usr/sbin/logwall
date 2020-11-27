@@ -34,6 +34,7 @@ $stats_file = "/var/run/shm/logwall-stats.json";
 $stats_write_min_interval = 1.0;
 $stats_last_written = 0;
 $stats_in_memory = {};
+@fifo_specs = ();
 @fifo_listeners = ();
 $quiet = 0;
 $config_syntax_check_mode = 0;
@@ -47,7 +48,7 @@ GetOptions(
     'P|pidfile=s'   => \$pid_file,
     'S|statsfile=s' => \$stats_file,
     'stats-write-min-interval=f' => \$stats_write_min_interval,
-    'f|fifo=s@'     => \@fifo_listeners,
+    'f|fifo=s@'     => \@fifo_specs,
     'q|quiet'       => \$quiet,
     't|configtest'  => \$config_syntax_check_mode,
     'help'          => sub {
@@ -59,9 +60,15 @@ GetOptions(
  --pidfile, -P     File to write PID into ($pid_file)
  --statsfile, -S   File to write and update statistics in JSON format into ($stats_file)
  --stats-write-min-interval  Minimum amount of seconds to wait between flush stats file ($stats_write_min_interval)
- --fifo, -f        Fifo specifications to listen to raw log messages on
+ --fifo, -f        Fifo specifications (see below) to listen to raw log messages on
  --quiet, -q       Output less messages at start
  --configtest, -t  Run normally but evaluate all test terms in all rules to test the configuration syntax
+ 
+Fifo syntax: \"NICKNAME:OWNER:GROUP:MODE:FILEPATH\", where
+ Messages coming in on this fifo can be matched by \"fifonick==NICKNAME\".
+ NICKNAME must start with alphanum or empty, in latter case basename of FILEPATH will be used.
+ OWNER and GROUP are system user- and groupname, or UID and GID, or -1.
+ MODE defaults to 0666. FILEPATH will be created and opened for read.
 ";
     	exit;
     },
@@ -175,6 +182,7 @@ sub waitread
 	# here while reading from socket.
 	
 	my $fh = shift;
+	my $delimiter = shift;
 	while(1)
 	{
 		addstats({});
@@ -184,6 +192,7 @@ sub waitread
 		my $available = select $readers, undef, undef, $stats_write_min_interval;
 		if($available)
 		{
+			local $/ = $delimiter;
 			return <$fh>;
 		}
 	}
@@ -446,7 +455,7 @@ sub process_rules
 	
 	seek $rules, 0, 0;
 	local $/ = "\n";
-	
+
 	RULES:
 	while(my $rule_line_rest = <$rules>)
 	{
@@ -546,12 +555,12 @@ sub process_rules
 					my $positive = 1;
 					my $case_sensitive = 1;
 					my $base_op = $op;
-					if(substr($base_op, 0, 1) == '!')
+					if(substr($base_op, 0, 1) eq '!')
 					{
 						$positive = 0;
 						$base_op = substr $base_op, 1;
 					}
-					if(substr($base_op, -1) == '*')
+					if(substr($base_op, -1) eq '*')
 					{
 						$case_sensitive = 0;
 						$base_op = substr $base_op, 0, -1;
@@ -759,7 +768,7 @@ sub process_rules
 		    {
 				$rule_line_rest =~ s/\s*$//;
 				$rule_line_rest =~ s/\s*(\x23.*)?$//;  # strip comments, \x23 is hashmark
-				if(length $rule_line_rest)
+				if($rule_line_rest ne '')
 				{
 					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$rule_line_rest'";
 					$this_rule_match = 0 unless defined $this_rule_match;
@@ -768,7 +777,7 @@ sub process_rules
 				
 				# match the rule if all test terms are matched in it:
 				$this_rule_match = 1 unless defined $this_rule_match;
-				goto TEST_TERM_END;
+				goto RULE_END;
 			}
 			
 			TEST_TERM_END:
@@ -946,7 +955,7 @@ sub logwall_worker
 	}
 	my $stream_ok = process_rules($backend, $stream_rules, $stream_rules_file, \%PeerVar);
 	close $stream_rules;
-	
+
 	if($stream_ok)
 	{
 		if(!open $rules, '<', $rules_file)
@@ -955,16 +964,14 @@ sub logwall_worker
 			return 0;
 		}
 		
-		local $/;
 		if(not defined $PeerVar{"terminator"})
 		{
 			if($PeerVar{"fifonick"} ne '') { $PeerVar{"terminator"} = "\n"; }
 			else { $PeerVar{"terminator"} = "\x00"; }
 		}
-		$/ = $PeerVar{"terminator"};
 		
 		DATAGRAM:
-		while($_ = waitread($client))
+		while($_ = waitread($client, $PeerVar{"terminator"}))
 		{
 			my %EventVar = %PeerVar;
 			addstats({
@@ -1060,9 +1067,9 @@ sub splitFifoSpec
 	if($owner eq '') { $owner = $>; }
 	if($group eq '') { ($group) = split ' ', $); }
 	if($mode eq '') { $mode = 0666; } else { $mode = oct $mode; }
-	if($owner =~ /^\d+$/) { $uid = $owner; }
+	if($owner =~ /^-?\d+$/) { $uid = $owner; }
 	else { (undef, undef, $uid) = getpwnam $owner; }
-	if($group =~ /^\d+$/) { $gid = $group; }
+	if($group =~ /^-?\d+$/) { $gid = $group; }
 	else { (undef, undef, $gid) = getgrnam $group; }
 	return ($nick, $uid, $gid, $mode, $file);
 }
@@ -1127,18 +1134,18 @@ open($Rules_fd, '<', $rules_file) or early_die $str;
 print STDERR "Exists\n" if !$quiet;
 close $Rules_fd;
 
-for my $fifospec (@fifo_listeners)
+for my $fifospec (@fifo_specs)
 {
 	my ($nick, $uid, $gid, $mode, $file) = splitFifoSpec($fifospec);
 	if($nick !~ /^[a-z_]/i or $mode !~ /^\d*$/)
 	{
 		$! = 0;
-		early_die "Invalid FIFO spec. Valid form: 'NICKNAME:OWNER:GROUP:MODE:FILEPATH', where NICKNAME must start with alphanum or empty, in latter case basename of FILEPATH will be used.", 1;
+		early_die "Invalid FIFO spec.", 1;
 	}
 	if(not defined $uid or not defined $gid)
 	{
 		$! = 0;
-		early_die "Either Owner or Group is not exist", 1;
+		early_die "Either or both Owner ($uid) or Group ($gid) do not exist", 1;
 	}
 	
 	$str = "Fifo listener: $file: ";
@@ -1147,6 +1154,7 @@ for my $fifospec (@fifo_listeners)
 	mkfifo $file, $mode or early_die $str;
 	chown $uid, $gid, $file or early_die $str;
 	print STDERR "Created\n" if !$quiet;
+	push @fifo_listeners, {'path'=>Cwd::abs_path($file), 'nick'=>$nick,};
 }
 
 $str = "Backend: $sock_connect: ";
@@ -1187,7 +1195,7 @@ if($fork == 0)
 	
 	# Start FIFO listeners
 	
-	for my $fifospec (@fifo_listeners)
+	for my $fifo (@fifo_listeners)
 	{
 		$fifo_kid = fork;
 		if(not defined $fifo_kid)
@@ -1198,13 +1206,13 @@ if($fork == 0)
 		{
 			undef %kids;
 			undef $pid_file;
-			my ($nick, undef, undef, undef, $file) = splitFifoSpec($fifospec);
+			my $nick = $fifo->{'nick'};
 			while(1)
 			{
 				$0 = "logwall: $nick (closed)";
 				#my $openmode = '+<';  # non blocking, continue execution
 				my $openmode = '<';  # blocking until someone write onto the fifo
-				open my $client, $openmode, $file;
+				open my $client, $openmode, $fifo->{'path'};
 				$0 = "logwall: $nick (open)";
 				logwall_worker($client, $nick);
 				close $client;
