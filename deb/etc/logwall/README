@@ -1,5 +1,10 @@
+## logwall(1) ruleset files
 ##
-## logwall(1) ruleset file
+##  - stream-rules   evaluated for every log stream
+##  - rules          evaluated on every log message
+##
+## See /usr/share/doc/logwall/examples for examples.
+##
 ##
 ## Syntax:
 ##   <keyword><operator><value>
@@ -20,7 +25,7 @@
 ##
 ##     *=Takes numeric right value
 ##     **=Takes numeric right value or facility/serverity name
-##     ***=Takes either numeric or string right value
+##     ***=Takes either numeric or string right-value
 ##
 ##     Aliases:
 ##       level = severity
@@ -57,7 +62,7 @@
 ##   comm
 ##   args
 ##     command name and command line arguments of running process (see /proc/PID/comm and /proc/PID/cmdline).
-##     can be forged by user
+##     can be forged by user.
 ##   exe_uid
 ##   exe_gid
 ##     executable file's owner and group owner (see exe)
@@ -151,7 +156,7 @@
 ##
 ## Variable substitution:
 ##   Testing keywords are substituted with their value
-##   Example, appending the name of the user runnin the process to the ident field:
+##   Example, appending the name of the user running the process to the ident field:
 ##     facility==user sourcename+="-{{proc_owner}}"
 ##
 ## Regexp substitution:
@@ -201,44 +206,3 @@
 ##   PATH
 ##     Path of fifo file to be created
 ##
-
-
-### Rewrites ###
-
-tag=~*cron sourcename:=cron
-sourcename==cupsd proc_owner==root facility==user facility:=lpr
-tag=^/etc/mysql/debian-start sourcename:=mysqld-debian
-tag=^/etc/init.d/mysql sourcename:=mysqld-debian
-sourcename==apcupsd msg=%"Power failure" severity:=crit
-
-# enforce "fifo-" prefox for messages arrived on fifo
-fifonick!=="" tag:=fifo-{{fifonick}}
-
-# log all logs
-#log=debug
-
-
-### Filters ###
-
-# most system processes
-proc_uid!==-1 proc_uid<1000 action=accept
-
-# trusted programms
-exe==/sbin/unix_chkpwd action=accept
-exe==/usr/bin/sudo action=accept
-exe==/bin/su action=accept
-
-# trusted fifo
-fifonick==supervisor action=accept
-
-# disallow high level messages from who we don't know
-exe=="" severity<error log="info;Unknown exe: " action=drop
-proc_owner=="" severity<error log="info;Unknown process owner: " action=drop
-
-# allow only these for everyone else
-facility==user action=accept
-facility>=local1 facility!==local3 facility<=local7 action=accept
-
-# drop policy
-log="notice,ALL,msg;Drop by policy: " action=drop
-

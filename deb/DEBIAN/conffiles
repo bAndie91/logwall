@@ -1,4 +1,2 @@
 /etc/init.d/logwall
 /etc/default/logwall
-/etc/logwall/rules
-/etc/logwall/stream-rules
