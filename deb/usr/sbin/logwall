@@ -769,16 +769,23 @@ sub process_rules
 		    {
 				$rule_line_rest =~ s/\s*$//;
 				$rule_line_rest =~ s/\s*(\x23.*)?$//;  # strip comments, \x23 is hashmark
-				if($rule_line_rest ne '')
+				if($rule_line_rest eq '')
+				{
+					# match the rule if all test terms are matched in it:
+					$this_rule_match = 1 unless defined $this_rule_match;
+					goto RULE_END;
+				}
+				else
 				{
 					selflog $backend, $sevnum{'err'}, "parse error in $rules_file on line $nl near '$rule_line_rest'";
 					$this_rule_match = 0 unless defined $this_rule_match;
-					last TESTS;
+					if($config_syntax_check_mode)
+					{
+						# try to seek to the next term neglecting that this one is not understood
+						$rule_line_rest =~ s/\s*(\S*"[^""]*"|\S+)//;
+					}
+					goto TEST_TERM_END;
 				}
-				
-				# match the rule if all test terms are matched in it:
-				$this_rule_match = 1 unless defined $this_rule_match;
-				goto RULE_END;
 			}
 			
 			TEST_TERM_END:
