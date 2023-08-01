@@ -3,7 +3,7 @@
 set -e
 set -o pipefail
 
-. /usr/lib/yazzy-utils/bash-utils
+. /usr/lib/tool/bash-utils
 
 perl -c deb/usr/sbin/logwall
 
