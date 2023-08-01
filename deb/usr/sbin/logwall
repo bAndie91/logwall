@@ -8,7 +8,7 @@ use constant { STAT_DEVNO=>0, STAT_INO=>1, STAT_MODE=>2, STAT_LINKS=>3, STAT_UID
 use JSON;
 use Fcntl ':flock';
 use Cwd;
-use Time::HiRes 'time', 'sleep';
+use Time::HiRes 'time', 'sleep', 'alarm';
 
 
 @facnam = qw/kern user mail daemon auth syslog lpr news uucp cron authpriv ftp ntp audit alert clock local0 local1 local2 local3 local4 local5 local6 local7/;
@@ -174,12 +174,15 @@ sub addstats_write
 
 sub waitread
 {
-	# read from given filehandle and pay attention on background jobs,
+	# read from given filehandle and pay attention on background tasks,
 	# such as flushing stats to stats file.
 	#
-	# because i dont want to do multithreading just to batch up stats,
-	# so i check batch flush timeouts here, as the process idles mostly 
-	# here while reading from socket.
+	# because i don't want to do multithreading just to batch up stats,
+	# and i expect any other background task some up later is "quick"
+	# ie. does not hang up the process indefinitely,
+	# plus the process spends its idle time mostly here reading the input;
+	# so i timeout the "readline" call and do background tasks in between
+	# retries.
 	
 	my $fh = shift;
 	my $delimiter = shift;
@@ -187,13 +190,18 @@ sub waitread
 	{
 		addstats({});
 		
-		my $readers = '';
-		vec($readers, fileno($fh), 1) = 1;
-		my $available = select $readers, undef, undef, $stats_write_min_interval;
-		if($available)
-		{
+		my $input = '';
+		eval {
+			local $SIG{'ALRM'} = sub { die 'TIMEOUT\n'; };
 			local $/ = $delimiter;
-			return <$fh>;
+			alarm $stats_write_min_interval;
+			$input = <$fh>;
+		};
+		if(not $@)
+		{
+			# diamond operator did not timed out; input is valid
+			alarm 0;
+			return $input;
 		}
 	}
 }
