@@ -478,9 +478,11 @@ sub process_rules
 			if($rule_line_rest =~ /^\s*([a-z_]+)((?:(?:!)?(?:==|=~|=\^|=\$|=\%)(?:\*)?)|=|>=|<=|>|<|:=|\^=|\+=|:~)("[^""]*"|\S*)/)
 			{
 				$rule_line_rest = $';
-				my ($test_original, $op, $value) = ($1, $2, $3);
-				$value = $1 if $value =~ /^"([^""]*)"$/;
+				my ($test_original, $op, $value_original) = ($1, $2, $3);
 				my $test = resolvealias(lc $test_original);
+				$value_original = $1 if $value_original =~ /^"([^""]*)"$/;
+				my $value = $value_original;
+				replace_templates(\$value, \%RuleVar);
 				
 				# Convert string-represented facility/severity to facility/severity number
 				if($test ~~ ['facility', 'severity'] and $value !~ /^\d+$/)
@@ -591,7 +593,7 @@ sub process_rules
 							
 							if($op eq ':~')
 							{
-								my ($patt, $repl) = split '~', $value, 2;
+								my ($patt, $repl) = split '~', $value_original, 2;
 								replace_templates(\$repl, \%RuleVar, sub {
 									my ($prestr, $tmplvar) = @_;
 									$prestr =~ s/\\+$/$&$&/;  # escape backslashes directly preceeding a template variable
@@ -604,12 +606,9 @@ sub process_rules
 							}
 							else
 							{
-								my $newvalue = $value;
-								replace_templates(\$newvalue, \%RuleVar);
-								
-								$rwVar{$test} = $newvalue if $op eq ':=';
-								$rwVar{$test} = $newvalue.$RuleVar{$test} if $op eq '^=';
-								$rwVar{$test} = $RuleVar{$test}.$newvalue if $op eq '+=';
+								$rwVar{$test} = $value if $op eq ':=';
+								$rwVar{$test} = $value.$RuleVar{$test} if $op eq '^=';
+								$rwVar{$test} = $RuleVar{$test}.$value if $op eq '+=';
 							}
 							
 							apply_rewrites(\%RuleVar, \%rwVar);
